@@ -76,6 +76,9 @@ contract PikaPerpV2 is IPikaPerp {
     uint256 public pikaRewardRatio = 0.20e8; // 20%, percent of trading fee to reward pika holders
     uint256 public pikaReward; // the trading fee reward for pika holders.
     uint256 public checkBackRounds = 100; // number of rounds to check back to search for the first round with timestamp that is larger than target timestamp
+    uint256 minProfit = 0.01e8; // the minimum profit percent for trader to close trade with profit
+    uint256 minProfitTime = 12 hours; // the time window where minProfit is effective
+    bool isPikaEnabled = true;
     Vault private vault;
     address public pika; // The address of PIKA stablecoin.
     address payable public rewardDistributor;
@@ -281,6 +284,13 @@ contract PikaPerpV2 is IPikaPerp {
         require(product.isActive, "!product-active");
         require(leverage <= uint256(product.maxLeverage), "!max-leverage");
 
+        // Check Pika
+        if (isPika) {
+            require(leverage == 1 && isPikaEnabled, "!pika");
+        } else {
+            require(leverage == 1 && isPikaEnabled, "!pika");
+        }
+
         // Check exposure
         uint256 amount = margin * leverage / 10**8;
 
@@ -307,34 +317,18 @@ contract PikaPerpV2 is IPikaPerp {
 
         address user = msg.sender;
 
-        nextPositionId++;
+        uint256 positionId = getPositionId(user, productId, isLong, isPika);
 
-        if (isPika) {
-            require(leverage == 1, "leverage not 1 when minting pika");
-            positions[nextPositionId] = Position({
-                owner: user,
-                productId: uint64(productId),
-                margin: uint64(margin),
-                leverage: uint64(leverage),
-                price: uint64(price),
-                timestamp: uint80(block.timestamp),
-                isLong: isLong,
-                isSettling: true,
-                isPika: true
-            });
-            emit NewPosition(
-                nextPositionId,
-                user,
-                productId,
-                isLong,
-                price,
-                margin,
-                leverage,
-                true
-            );
+        Position storage position = positions[positionId];
+
+        if (position.margin > 0) {
+            price = (position.margin * position.leverage * position.price + margin * leverage * price) /
+                (position.margin * position.leverage + margin * leverage);
+            leverage = (position.margin * position.leverage + margin * leverage) / (position.margin  + margin);
+            margin = position.margin  + margin;
         }
 
-        positions[nextPositionId] = Position({
+        positions[positionId] = Position({
             owner: user,
             productId: uint64(productId),
             margin: uint64(margin),
@@ -342,19 +336,19 @@ contract PikaPerpV2 is IPikaPerp {
             price: uint64(price),
             timestamp: uint80(block.timestamp),
             isLong: isLong,
-            isSettling: true,
-            isPika: false
+            isSettling: isPika ? true : false,
+            isPika: isPika
         });
 
         emit NewPosition(
-            nextPositionId,
+            positionId,
             user,
             productId,
             isLong,
             price,
             margin,
             leverage,
-            false
+            isPika
         );
 
     }
@@ -447,6 +441,11 @@ contract PikaPerpV2 is IPikaPerp {
                 } else {
                     pnl = margin * uint256(position.leverage) * (uint256(position.price) - price) / (uint256(position.price) * 10**8);
                 }
+            }
+
+            // front running protection: if pnl is smaller than min profit threshold and minProfitTime has not passed, the pnl is be set to 0
+            if (!pnlIsNegative && block.timestamp < position.timestamp + minProfitTime && pnl < margin * uint256(position.leverage) * minProfit / 10**24) {
+                pnl = 0;
             }
 
             // Subtract interest from P/L
@@ -633,6 +632,15 @@ contract PikaPerpV2 is IPikaPerp {
         }
 
 
+    }
+
+    function getPositionId(
+        address account,
+        uint256 productId,
+        bool isLong,
+        bool isPika
+    ) public pure returns (uint256) {
+        return uint256(keccak256(abi.encodePacked(account, productId, isLong, isPika)));
     }
 
     // Checks if positionIds can be settled
@@ -898,6 +906,10 @@ contract PikaPerpV2 is IPikaPerp {
     ) public view returns(uint256) {
         // use binary search to find the 1st round with larger timestamp than blockTime
         uint256 high = AggregatorV2V3Interface(feed).latestRound();
+        // add this check since most of time blockTime is larger than latest feed update time
+        if (AggregatorV2V3Interface(feed).latestTimestamp() <= blockTime) {
+            return high;
+        }
         uint256 low = high - checkBackRounds;
         while (low != high) {
             uint256 mid = (low + high) / 2;
@@ -1059,6 +1071,10 @@ contract PikaPerpV2 is IPikaPerp {
 
     function setCheckBackRounds(uint newCheckBackRounds) external onlyOwner {
         checkBackRounds = newCheckBackRounds;
+    }
+
+    function setIsPikaEnabled(bool newIsPikaEnabled) external onlyOwner {
+        isPikaEnabled = newIsPikaEnabled;
     }
 
     function setOwner(address newOwner) external onlyOwner {
