@@ -4,10 +4,9 @@ pragma solidity ^0.8.0;
 import "@openzeppelin/contracts/utils/math/SafeMath.sol";
 import "@chainlink/contracts/src/v0.8/interfaces/AggregatorV2V3Interface.sol";
 import './IPikaPerp.sol';
-import '../token/IPika.sol';
 import "hardhat/console.sol";
 
-contract PikaPerpV2 is IPikaPerp {
+contract PikaPerpV2 {
     using SafeMath for uint256;
     using SafeMath for uint64;
     // All amounts are stored with 8 decimals
@@ -47,7 +46,6 @@ contract PikaPerpV2 is IPikaPerp {
         uint48 openInterestLong; // 6 bytes
         uint48 openInterestShort; // 6 bytes
         uint16 interest; // For 360 days, in bps. 5.35% = 535. 2 bytes
-        uint32 settlementTime; // In seconds. 4 bytes
         uint16 minTradeDuration; // In seconds. 2 bytes
         uint16 liquidationThreshold; // In bps. 8000 = 80%. 2 bytes
         uint16 liquidationBounty; // In bps. 500 = 5%. 2 bytes
@@ -59,14 +57,11 @@ contract PikaPerpV2 is IPikaPerp {
         uint64 productId; // 8 bytes
         uint64 leverage; // 8 bytes
         uint64 price; // 8 bytes
-        uint64 oraclePrice; // 8 bytes
         uint64 margin; // 8 bytes
         // 32 bytes
         address owner; // 20 bytes
         uint80 timestamp; // 10 bytes
         bool isLong; // 1 byte
-        bool isSettling; // 1 byte
-        bool isPika; // 1 byte
     }
 
     // Variables
@@ -78,18 +73,11 @@ contract PikaPerpV2 is IPikaPerp {
     uint256 public nextPositionId; // Incremental
     uint256 public protocolFee;  // In bps. 0.01e8 = 1%
     uint256 public maxShift = 0.003e8; // max shift (shift is used adjust the price to balance the longs and shorts)
-    uint256 public pikaFee = 0.008e8; // 1%, fee to pay when close pika position
-    uint256 public pikaRewardRatio = 0.20e8; // 20%, percent of trading fee to reward pika holders
-    uint256 public cumulativePikaReward; // the trading fee reward for pika holders.
     uint256 public checkBackRounds = 100; // number of rounds to check back to search for the first round with timestamp that is larger than target timestamp
     uint256 minProfit = 0.01e8; // 1%, the minimum profit percent for trader to close trade with profit
     uint256 minProfitTime = 12 hours; // the time window where minProfit is effective
-    uint256 mintPikaAmount;
     uint256 averageMintPikaPrice;
-    bool isPikaEnabled = true;
     Vault private vault;
-    address public pika; // The address of PIKA stablecoin.
-    address payable public rewardDistributor;
 
     mapping(uint256 => Product) private products;
     mapping(uint256 => Stake) private stakes;
@@ -118,8 +106,7 @@ contract PikaPerpV2 is IPikaPerp {
         bool isLong,
         uint256 price,
         uint256 margin,
-        uint256 leverage,
-        bool isPika
+        uint256 leverage
     );
     event NewPositionSettled(
         uint256 indexed positionId,
@@ -164,31 +151,16 @@ contract PikaPerpV2 is IPikaPerp {
         Product product
     );
     event FeeUpdated(
-        uint256 protocolFee,
-        uint256 pikaFee
+        uint256 protocolFee
     );
     event OwnerUpdated(
         address newOwner
     );
-    event MintPika(
-        uint256 positionId,
-        address owner,
-        uint256 amount
-    );
-    event BurnPika(
-        address owner,
-        uint256 amount
-    );
-    event RewardDistribute(
-        address payable indexed rewardDistributor, // The distributor address to receive the trading fee reward.
-        uint amount // The amount of tokens collected.
-    );
 
     // Constructor
 
-    constructor(address _pika) {
+    constructor() {
         owner = msg.sender;
-        pika = _pika;
         vault = Vault({
             cap: 0,
             maxDailyDrawdown: 0,
@@ -292,8 +264,7 @@ contract PikaPerpV2 is IPikaPerp {
     function openPosition(
         uint256 productId,
         bool isLong,
-        uint256 leverage,
-        bool isPika
+        uint256 leverage
     ) external payable {
 
         uint256 margin = msg.value / 10**10; // truncate to 8 decimals
@@ -323,14 +294,10 @@ contract PikaPerpV2 is IPikaPerp {
 
         address user = msg.sender;
 
-        uint256 positionId = getPositionId(user, productId, isLong, isPika);
+        uint256 positionId = getPositionId(user, productId, isLong);
 
         Position storage position = positions[positionId];
 
-        // Check Pika
-        if (isPika) {
-            require(!isLong && leverage == 1e8 && isPikaEnabled && position.margin == 0, "!pika");
-        }
 
         if (position.margin > 0) {
 //            console.log("price", price);
@@ -348,11 +315,8 @@ contract PikaPerpV2 is IPikaPerp {
             margin: uint64(margin),
             leverage: uint64(leverage),
             price: uint64(price),
-            oraclePrice: uint64(getLatestPrice(product.feed, 0)),
             timestamp: uint80(block.timestamp),
-            isLong: isLong,
-            isSettling: isPika ? true : false,
-            isPika: isPika
+            isLong: isLong
         });
 
         emit NewPosition(
@@ -362,8 +326,7 @@ contract PikaPerpV2 is IPikaPerp {
             isLong,
             price,
             margin,
-            leverage,
-            isPika
+            leverage
         );
 
     }
@@ -379,7 +342,6 @@ contract PikaPerpV2 is IPikaPerp {
         // Check position
         Position storage position = positions[positionId];
         require(msg.sender == position.owner, "!owner");
-        require(position.isPika == false, "pika");
 
         // New position params
         uint256 newMargin = uint256(position.margin) + margin;
@@ -412,7 +374,6 @@ contract PikaPerpV2 is IPikaPerp {
         // Check position
         Position storage position = positions[positionId];
         require(msg.sender == position.owner, "!owner");
-        require(!position.isSettling, "!settling");
 
         // Check product
         Product storage product = products[uint256(position.productId)];
@@ -478,10 +439,8 @@ contract PikaPerpV2 is IPikaPerp {
             if (protocolFee > 0) {
                 uint256 protocolFeeAmount = protocolFee * margin * position.leverage / 10**16;
 //                console.log("protocolFeeAmount", protocolFeeAmount);
-                uint256 pikaReward = protocolFeeAmount * pikaRewardRatio / (10**8);
-                cumulativePikaReward += pikaReward;
-                payable(owner).transfer((protocolFeeAmount - pikaReward) * 10**10);
-                console.log("transfer out protocol fee", protocolFeeAmount - pikaReward);
+                payable(owner).transfer((protocolFeeAmount) * 10**10);
+                console.log("transfer out protocol fee", protocolFeeAmount);
                 if (pnlIsNegative) {
                     pnl += protocolFeeAmount;
                 } else if (pnl < protocolFeeAmount) {
@@ -534,82 +493,6 @@ contract PikaPerpV2 is IPikaPerp {
 
     }
 
-    function closePikaPosition(
-        uint256 pikaAmount,
-        bool releaseMargin
-    ) external {
-        Product storage product = products[uint256(1)]; // eth product
-        uint256 margin = pikaAmount * 10**8 / averageMintPikaPrice;
-        uint256 price = _calculatePriceWithFee(product.feed, uint256(product.fee), true, product.openInterestLong, product.openInterestShort,
-            uint256(product.maxExposure), uint256(product.reserve), margin);
-//        console.log("margin", margin);
-
-
-        uint256 pnl;
-        bool pnlIsNegative;
-
-        if (price > averageMintPikaPrice) {
-            pnl = margin * (price - averageMintPikaPrice) / (averageMintPikaPrice);
-            pnlIsNegative = true;
-        } else {
-            pnl = margin * (averageMintPikaPrice - price) / (averageMintPikaPrice);
-        }
-//        console.log("pnl", pnlIsNegative);
-
-
-        // Subtract interest from P/L
-        uint256 interest = margin * pikaFee / 10**8; // interest rate
-//         console.log("interest", interest);
-        if (pnlIsNegative) {
-            pnl += interest;
-        } else if (pnl < interest) {
-            pnl = interest - pnl;
-            pnlIsNegative = true;
-        } else {
-            pnl -= interest;
-        }
-
-        // Calculate protocol fee
-        if (protocolFee > 0) {
-            uint256 protocolFeeAmount = protocolFee * margin / 10**8;
-//            console.log("protocolFeeAmount", protocolFeeAmount);
-            uint256 pikaReward = protocolFeeAmount * pikaRewardRatio / (10**8);
-            cumulativePikaReward += pikaReward;
-            payable(owner).transfer((protocolFeeAmount - pikaReward) * 10**10);
-            console.log("transfer out protocol fee when closing pika", protocolFeeAmount - pikaReward);
-            if (pnlIsNegative) {
-                pnl += protocolFeeAmount;
-            } else if (pnl < protocolFeeAmount) {
-                pnl = protocolFeeAmount - pnl;
-                pnlIsNegative = true;
-            } else {
-                pnl -= protocolFeeAmount;
-            }
-        }
-
-        // Checkpoint vault
-        if (uint256(vault.lastCheckpointTime) < block.timestamp - 24 hours) {
-            vault.lastCheckpointTime = uint80(block.timestamp);
-            vault.lastCheckpointBalance = uint80(vault.balance);
-        }
-
-        // Update vault
-        pnl = _checkAndUpdateVault(pnl, pnlIsNegative, margin, releaseMargin, msg.sender);
-
-        if (uint256(product.openInterestShort) >= margin) {
-            product.openInterestShort -= uint48(margin);
-        } else {
-            product.openInterestShort = 0;
-        }
-
-        IPika(pika).burn(msg.sender, pikaAmount * 10**10);
-
-        emit BurnPika(
-            msg.sender,
-            pikaAmount
-        );
-    }
-
     function _checkAndUpdateVault(uint256 pnl, bool pnlIsNegative, uint256 margin, bool releaseMargin, address positionOwner) internal returns(uint256) {
         // Checkpoint vault
         if (uint256(vault.lastCheckpointTime) < block.timestamp - 24 hours) {
@@ -654,69 +537,9 @@ contract PikaPerpV2 is IPikaPerp {
     function getPositionId(
         address account,
         uint256 productId,
-        bool isLong,
-        bool isPika
+        bool isLong
     ) public pure returns (uint256) {
-        return uint256(keccak256(abi.encodePacked(account, productId, isLong, isPika)));
-    }
-
-    // Checks if positionIds can be settled
-    function canSettlePositions(uint256[] calldata positionIds) external view returns(uint256[] memory _positionIds) {
-
-        uint256 length = positionIds.length;
-        _positionIds = new uint256[](length);
-
-        for (uint256 i = 0; i < length; i++) {
-            uint256 positionId = positionIds[i];
-            Position storage position = positions[positionId];
-            if (position.productId == 0 || !position.isSettling) {
-                continue;
-            }
-
-            Product storage product = products[uint256(position.productId)];
-//            console.log("interval", block.timestamp - uint256(position.timestamp));
-            if (block.timestamp - uint256(position.timestamp) >= uint256(product.settlementTime) || getLatestPrice(product.feed, 0) != uint256(position.oraclePrice)) {
-                _positionIds[i] = positionId;
-            }
-        }
-        return _positionIds;
-    }
-
-    // Settles positionIds
-    function settlePositions(uint256[] calldata positionIds) external {
-
-        uint256 length = positionIds.length;
-
-        for (uint256 i = 0; i < length; i++) {
-
-            uint256 positionId = positionIds[i];
-
-            Position storage position = positions[positionId];
-
-            if (position.productId == 0 || !position.isSettling || !position.isPika) {
-                continue;
-            }
-
-            Product storage product = products[uint256(position.productId)];
-
-            uint256 price = _calculatePriceWithFee(product.feed, uint256(product.fee), position.isLong,product.openInterestLong, product.openInterestShort - position.margin,
-                uint256(product.maxExposure), uint256(product.reserve), position.margin * position.leverage / 10**8);
-
-            if (block.timestamp - uint256(position.timestamp) >= uint256(product.settlementTime) || getLatestPrice(product.feed, 0) != uint256(position.oraclePrice)) {
-                uint256 amount = position.margin * uint256(price) / (10**8);
-                IPika(pika).mint(position.owner, amount * (10**10));
-                averageMintPikaPrice = (averageMintPikaPrice * mintPikaAmount + price * amount) / (mintPikaAmount + amount);
-                mintPikaAmount += amount;
-                delete positions[positionId];
-//                console.log("minting pika", amount);
-                emit MintPika(
-                    positionId,
-                    position.owner,
-                    amount
-                );
-            }
-        }
-
+        return uint256(keccak256(abi.encodePacked(account, productId, isLong)));
     }
 
     // Liquidate positionIds
@@ -731,7 +554,7 @@ contract PikaPerpV2 is IPikaPerp {
             uint256 positionId = positionIds[i];
             Position memory position = positions[positionId];
 
-            if (position.productId == 0 || position.isSettling) {
+            if (position.productId == 0) {
                 continue;
             }
 
@@ -797,19 +620,6 @@ contract PikaPerpV2 is IPikaPerp {
         if (totalLiquidatorReward > 0) {
             payable(liquidator).transfer(totalLiquidatorReward);
         }
-
-    }
-
-    function distributeReward() external override returns (uint256) {
-        require(msg.sender == rewardDistributor, "sender is not rewardDistributor");
-        if (cumulativePikaReward > 0) {
-            uint distributedReward = cumulativePikaReward;
-            cumulativePikaReward = 0;
-            payable(rewardDistributor).transfer(distributedReward * 10**10);
-            emit RewardDistribute(rewardDistributor, distributedReward);
-            return distributedReward;
-        }
-        return 0;
     }
 
     // Getters
@@ -877,11 +687,6 @@ contract PikaPerpV2 is IPikaPerp {
 
         return priceToReturn;
 
-    }
-
-    /// Get the reward that has not been distributed.
-    function getPendingReward() external override view returns (uint256) {
-        return cumulativePikaReward;
     }
 
     // Internal methods
@@ -975,7 +780,6 @@ contract PikaPerpV2 is IPikaPerp {
 
         require(_product.maxLeverage > 0, "!max-leverage");
         require(_product.feed != address(0), "!feed");
-        require(_product.settlementTime > 0, "!settlementTime");
         require(_product.liquidationThreshold > 0, "!liquidationThreshold");
 
         products[productId] = Product({
@@ -987,7 +791,6 @@ contract PikaPerpV2 is IPikaPerp {
             openInterestLong: 0,
             openInterestShort: 0,
             interest: _product.interest,
-            settlementTime: _product.settlementTime,
             minTradeDuration: _product.minTradeDuration,
             liquidationThreshold: _product.liquidationThreshold,
             liquidationBounty: _product.liquidationBounty,
@@ -1005,7 +808,6 @@ contract PikaPerpV2 is IPikaPerp {
 
         require(_product.maxLeverage >= 1 * 10**8, "!max-leverage");
         require(_product.feed != address(0), "!feed");
-        require(_product.settlementTime > 0, "!settlementTime");
         require(_product.liquidationThreshold > 0, "!liquidationThreshold");
 
         product.feed = _product.feed;
@@ -1014,7 +816,6 @@ contract PikaPerpV2 is IPikaPerp {
         product.isActive = _product.isActive;
         product.maxExposure = _product.maxExposure;
         product.interest = _product.interest;
-        product.settlementTime = _product.settlementTime;
         product.minTradeDuration = _product.minTradeDuration;
         product.liquidationThreshold = _product.liquidationThreshold;
         product.liquidationBounty = _product.liquidationBounty;
@@ -1023,28 +824,14 @@ contract PikaPerpV2 is IPikaPerp {
 
     }
 
-    function setFees(uint256 newProtocolFee, uint newPikaFee) external onlyOwner {
-        require(newProtocolFee <= 0.03e8 && newPikaFee <= 0.03e8, "!too-much"); // 1% and 3%
+    function setProtocolFees(uint256 newProtocolFee) external onlyOwner {
+        require(newProtocolFee <= 0.03e8, "!too-much"); // 1% and 3%
         protocolFee = newProtocolFee;
-        pikaFee = newPikaFee;
-        emit FeeUpdated(protocolFee, pikaFee);
-    }
-
-    function setRewardDistributor(address payable newRewardDistributor) external onlyOwner {
-        rewardDistributor = newRewardDistributor;
-    }
-
-    function setPikaRewardRatio(uint newPikaRewardRatio) external onlyOwner {
-        require(newPikaRewardRatio <= 0.50e8, "!too-much"); // 50% of protocol fee
-        pikaRewardRatio = newPikaRewardRatio;
+        emit FeeUpdated(protocolFee);
     }
 
     function setCheckBackRounds(uint newCheckBackRounds) external onlyOwner {
         checkBackRounds = newCheckBackRounds;
-    }
-
-    function setIsPikaEnabled(bool newIsPikaEnabled) external onlyOwner {
-        isPikaEnabled = newIsPikaEnabled;
     }
 
     function setOwner(address newOwner) external onlyOwner {
