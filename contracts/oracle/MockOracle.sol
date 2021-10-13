@@ -10,12 +10,8 @@ contract MockOracle {
     uint256 updatedAt = 1633435171;
     uint80 answeredInRound = 18446744073709555201;
 
-    function setPrice(uint256 _px) external {
-        px = _px;
-    }
-
-    function getPrice() external view returns (uint256) {
-        return px;
+    function setAnswer(int256 _answer) external {
+        answer = _answer;
     }
 
     function decimals()
