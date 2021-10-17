@@ -278,7 +278,7 @@ contract PikaPerpV2 {
         uint256 leverage
     ) external {
 
-        IERC20(usdc).safeTransferFrom(msg.sender, address(this), margin/100);
+        IERC20(usdc).safeTransferFrom(msg.sender, address(this), margin / 10**2);
 
         console.log("transfer in", margin);
         // Check params
@@ -339,9 +339,7 @@ contract PikaPerpV2 {
     // Add margin to Position with positionId
     function addMargin(uint256 positionId, uint256 margin) external {
 
-        IERC20(usdc).safeTransferFrom(msg.sender, address(this), margin);
-
-        margin = margin * 10**2; // truncate to 8 decimals
+        IERC20(usdc).safeTransferFrom(msg.sender, address(this), margin / 10**2);
 
         // Check params
         require(margin >= MIN_MARGIN, "!margin");
