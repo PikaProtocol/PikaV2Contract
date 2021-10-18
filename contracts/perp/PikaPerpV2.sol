@@ -115,11 +115,7 @@ contract PikaPerpV2 {
         uint256 margin,
         uint256 leverage
     );
-    event NewPositionSettled(
-        uint256 indexed positionId,
-        address indexed user,
-        uint256 price
-    );
+
     event AddMargin(
         uint256 indexed positionId,
         address indexed user,
@@ -144,7 +140,8 @@ contract PikaPerpV2 {
         uint256 indexed positionId,
         address indexed liquidator,
         uint256 liquidatorReward,
-        uint256 protocolReward
+        uint256 protocolReward,
+        uint256 vaultReward
     );
     event VaultUpdated(
         Vault vault
@@ -157,8 +154,8 @@ contract PikaPerpV2 {
         uint256 productId,
         Product product
     );
-    event FeeUpdated(
-        uint256 protocolReward
+    event ProtocolFeeUpdated(
+        uint256 protocolRewardRatio
     );
     event ProtocolUpdated(
         address protocol
@@ -306,7 +303,6 @@ contract PikaPerpV2 {
         address user = msg.sender;
         uint256 positionId = getPositionId(user, productId, isLong);
         Position storage position = positions[positionId];
-
         if (position.margin > 0) {
             price = (uint256(position.margin).mul(position.leverage).mul(uint256(position.price)).add(margin.mul(leverage).mul(price))).div(
                 uint256(position.margin).mul(position.leverage).add(margin.mul(leverage)));
@@ -570,14 +566,17 @@ contract PikaPerpV2 {
         uint256 price = IOracle(oracle).getPrice(product.feed); // use oracle price for liquidation
 
         if (_checkLiquidation(position, price, uint256(product.liquidationThreshold))) {
+            uint256 vaultReward;
             (uint256 pnl, bool pnlIsNegative) = _getPnL(position, price, product.interest);
             if (pnlIsNegative && uint256(position.margin) > pnl) {
                 liquidatorReward = (uint256(position.margin) - pnl) * uint256(product.liquidationBounty) / 10**4;
                 protocolReward = (uint256(position.margin) - pnl) * protocolRewardRatio / 10**4;
-                vault.balance += uint96(uint256(position.margin) - liquidatorReward - protocolReward);
+                vaultReward = uint256(position.margin) - liquidatorReward - protocolReward;
+                vault.balance += uint96(vaultReward);
                 console.log("+vault balance", uint96(uint256(position.margin) - liquidatorReward - protocolReward));
             } else {
-                vault.balance += uint96(position.margin);
+                vaultReward = position.margin;
+                vault.balance += uint96(vaultReward);
                 console.log("+vault balance", uint96(position.margin));
             }
 
@@ -617,7 +616,8 @@ contract PikaPerpV2 {
                 positionId,
                 msg.sender,
                 liquidatorReward,
-                protocolReward
+                protocolReward,
+                vaultReward
             );
         }
         return (liquidatorReward, protocolReward);
@@ -818,7 +818,7 @@ contract PikaPerpV2 {
     function setProtocolRewardRatio(uint256 _protocolRewardRatio) external onlyOwner {
         require(_protocolRewardRatio <= 10000, "!too-much"); // 1% and 3%
         protocolRewardRatio = _protocolRewardRatio;
-        emit FeeUpdated(protocolRewardRatio);
+        emit ProtocolFeeUpdated(protocolRewardRatio);
     }
 
     function setProtocolAddress(address _protocol) external onlyOwner {
