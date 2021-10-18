@@ -277,7 +277,6 @@ contract PikaPerpV2 {
 
         IERC20(usdc).safeTransferFrom(msg.sender, address(this), margin / 10**2);
 
-        console.log("transfer in", margin);
         // Check params
         require(margin >= MIN_MARGIN, "!margin");
         require(leverage >= 1 * 10**8, "!leverage");
@@ -453,13 +452,10 @@ contract PikaPerpV2 {
         // Update vault
         if (pnlIsNegative) {
             if (pnl < margin) {
-                console.log("transfer out in loss", margin - pnl);
-                console.log("+vault balance pnl", pnl);
                 IERC20(usdc).safeTransfer(positionOwner, (margin - pnl) / 10**2);
                 vault.balance += uint96(pnl);
             } else {
                 vault.balance += uint96(margin);
-                console.log("+vault balance margin", margin);
             }
 
         } else {
@@ -471,8 +467,6 @@ contract PikaPerpV2 {
             , "!max-drawdown");
 
             vault.balance -= uint96(pnl);
-            console.log("transfer out in profit", margin + pnl);
-            console.log("-vault balance", pnl);
             IERC20(usdc).safeTransfer(positionOwner, (margin + pnl) / 10**2);
         }
     }
@@ -545,12 +539,10 @@ contract PikaPerpV2 {
         }
 
         if (totalLiquidatorReward > 0) {
-            console.log("transfering out totalLiquidatorReward", totalLiquidatorReward / 10**2);
             IERC20(usdc).safeTransfer(msg.sender, totalLiquidatorReward / 10**2);
         }
 
         if (totalProtocolReward > 0) {
-            console.log("transfering out totalProtocolReward", totalProtocolReward / 10**2);
             IERC20(usdc).safeTransfer(protocol, totalProtocolReward / 10**2);
         }
     }
@@ -573,11 +565,9 @@ contract PikaPerpV2 {
                 protocolReward = (uint256(position.margin) - pnl) * protocolRewardRatio / 10**4;
                 vaultReward = uint256(position.margin) - liquidatorReward - protocolReward;
                 vault.balance += uint96(vaultReward);
-                console.log("+vault balance", uint96(uint256(position.margin) - liquidatorReward - protocolReward));
             } else {
                 vaultReward = position.margin;
                 vault.balance += uint96(vaultReward);
-                console.log("+vault balance", uint96(position.margin));
             }
 
             uint256 amount = uint256(position.margin) * uint256(position.leverage) / 10**8;
