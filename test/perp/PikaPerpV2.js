@@ -23,20 +23,21 @@ function _calculatePriceWithFee(feed, fee, isLong, openInterestLong, openInteres
 	if (isLong) {
 		// console.log("amount", amount)
 		let slippage = parseInt((reserve * reserve / (reserve - amount) - reserve) * (10**8) / amount);
-		// console.log("slippage", slippage)
-		slippage = shift >= 0 ?parseInt(slippage + shift) : Math.ceil(slippage - (-1 * shift / 2));
+		console.log(oraclePrice, reserve, amount)
+		console.log("slippage", slippage)
+		slippage = shift >= 0 ? parseInt(slippage + shift) : Math.ceil(slippage - (-1 * shift / 2));
 		// console.log("shift", shift)
-		// console.log("slippage", slippage)
+		console.log("final slippage", slippage)
 		let price = oraclePrice * slippage / (10**8);
 		// console.log("price", price);
 		// console.log("price", price + price * fee / 10**4);
 		return Math.ceil(price + price * fee / 10**4);
 	} else {
 		let slippage = parseInt((reserve - reserve * reserve / (reserve + amount)) * (10**8) / amount);
-		// console.log("slippage", slippage)
+		console.log("slippage", slippage)
 		slippage = shift >= 0 ? parseInt(slippage + shift / 2) : parseInt(slippage - (-1 * shift));
 		// console.log("shift", shift)
-		// console.log("slippage", slippage)
+		console.log("final slippage", slippage)
 		let price = oraclePrice * slippage / (10**8);
 		// console.log("oraclePrice", oraclePrice);
 		// console.log("price", price);
@@ -79,9 +80,9 @@ describe("Trading", () => {
 		owner = addrs[0];
 
         const usdcContract = await ethers.getContractFactory("SimpleERC20");
-		usdc = await usdcContract.deploy(6);
-		await usdc.mint(owner.address, 20000000000);
-		await usdc.mint(addrs[1].address, 20000000000);
+		usdc = await usdcContract.deploy();
+		await usdc.mint(owner.address, 100000000000);
+		await usdc.mint(addrs[1].address, 100000000000);
 		const oracleContract = await ethers.getContractFactory("MockOracle");
 		oracle = await oracleContract.deploy();
 
@@ -110,14 +111,17 @@ describe("Trading", () => {
 			100000000e8.toString(),
 			0,
 			0,
-			300,
-			120,
+			1000, // 10% annual interest
 			80 * 100, // 80%
 			50 * 100, // 50%
 			50000000e8 // 50m usdc
+			// "30000000000000000" // 300m usdc
  		]
 		// add products
 		await trading.addProduct(1, p);
+		// set maxMargin
+		await trading.setMaxPositionMargin(10000000000000);
+
 
 	});
 
@@ -188,11 +192,11 @@ describe("Trading", () => {
 
 			// 3. close long before minProfitTime with profit less than threshold
 			await provider.send("evm_increaseTime", [500])
-			latestPrice = 3035e8;
+			latestPrice = 3029e8;
 			const priceWithFee3 = _calculatePriceWithFee(oracle.address, 10, false, 3*margin*leverage/1e8, 0, 100000000e8, 50000000e8, 3*margin*leverage/1e8);
-			await oracle.setPrice(3035e8);
+			await oracle.setPrice(3029e8);
 			// await Trading.connect(addrs[1]).setFees(100, 0.01e8);
-			const tx3 = await trading.connect(addrs[userId]).closePosition(positionId, 3*margin);
+			const tx3 = await trading.connect(addrs[userId]).closePositionWithId(positionId, 3*margin);
 			expect(await tx3).to.emit(trading, "ClosePosition").withArgs(positionId, user, productId, true, priceWithFee3.toString(), position2.price, (2*margin).toString(), (leverage*1.5).toString(), 0, false, false);
 			// console.log("after close long", (await usdc.balanceOf(trading.address)).toString());
 			// console.log("vault balance", (await trading.getVault()).balance.toString());
@@ -244,10 +248,11 @@ describe("Trading", () => {
 			const priceWithFee3 = _calculatePriceWithFee(oracle.address, 10, true, 0, 3*margin*leverage/1e8, 100000000e8, 50000000e8, 3*margin*leverage/1e8);
 			await oracle.setPrice(3000e8);
 			// await trading.setFees(0.01e8, 0);
-			const tx3 = await trading.connect(addrs[userId]).closePosition(positionId, 3*margin);
+			// const tx3 = await trading.connect(addrs[userId]).closePosition(positionId, 3*margin);
+			const tx3 = await trading.connect(addrs[userId]).closePosition(1, false, 3*margin);
 			// console.log("after close short", (await usdc.balanceOf(trading.address)).toString());
 			// console.log("vault balance", (await trading.getVault()).balance.toString());
-			// expect(await tx3).to.emit(Trading, "ClosePosition").withArgs(positionId, user, productId, true, priceWithFee3.toString(), position2.price, (2*margin).toString(), (leverage*1.5).toString(), 0, false, false);
+			expect(await tx3).to.emit(trading, "ClosePosition").withArgs(positionId, user, productId, true, priceWithFee3.toString(), position2.price, (2*margin).toString(), (leverage*1.5).toString(), 0, false, false);
 		});
 
 		it(`liquidations`, async () => {

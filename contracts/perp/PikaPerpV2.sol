@@ -46,8 +46,7 @@ contract PikaPerpV2 {
         uint64 maxExposure; // Maximum allowed long/short imbalance. 8 bytes
         uint64 openInterestLong; // 6 bytes
         uint64 openInterestShort; // 6 bytes
-        uint16 interest; // For 360 days, in bps. 5.35% = 535. 2 bytes
-        uint16 minTradeDuration; // In seconds. 2 bytes
+        uint16 interest; // For 360 days, in bps. 10% = 1000. 2 bytes
         uint16 liquidationThreshold; // In bps. 8000 = 80%. 2 bytes
         uint16 liquidationBounty; // In bps. 500 = 5%. 2 bytes
         uint64 reserve; // Virtual reserve in USDC. Used to calculate slippage
@@ -69,17 +68,18 @@ contract PikaPerpV2 {
     // Variables
 
     address public owner; // Contract owner
+    address public liquidator;
     address public usdc;
     address public oracle;
     address public protocol;
     uint256 public MIN_MARGIN = 1000000000; // 10 usdc
-    uint256 public BASE = 1e8;
     uint256 public nextStakeId; // Incremental
     uint256 public nextPositionId; // Incremental
     uint256 public protocolRewardRatio = 3000;  // In bps. 100 = 1%
     uint256 public maxShift = 0.003e8; // max shift (shift is used adjust the price to balance the longs and shorts)
-    uint256 minPriceChange = 100; // 1%, the minimum oracle price up change for trader to close trade with profit
+    uint256 minPriceChange = 150; // 1.5%, the minimum oracle price up change for trader to close trade with profit
     uint256 minProfitTime = 12 hours; // the time window where minProfit is effective
+    uint256 maxPositionMargin; // for guarded launch
     bool canUserStake = false;
     bool allowPublicLiquidator = false;
     Vault private vault;
@@ -167,6 +167,7 @@ contract PikaPerpV2 {
 
     constructor(address _usdc, address _oracle) {
         owner = msg.sender;
+        liquidator = msg.sender;
         usdc = _usdc;
         oracle = _oracle;
         protocol = msg.sender;
@@ -272,7 +273,7 @@ contract PikaPerpV2 {
         uint256 margin,
         bool isLong,
         uint256 leverage
-    ) external {
+    ) external returns(uint256 positionId) {
 
         IERC20(usdc).safeTransferFrom(msg.sender, address(this), margin.div(10**2));
 
@@ -299,7 +300,7 @@ contract PikaPerpV2 {
         }
 
         address user = msg.sender;
-        uint256 positionId = getPositionId(user, productId, isLong);
+        positionId = getPositionId(user, productId, isLong);
         Position storage position = positions[positionId];
         if (position.margin > 0) {
             price = (uint256(position.margin).mul(position.leverage).mul(uint256(position.price)).add(margin.mul(leverage).mul(price))).div(
@@ -307,6 +308,7 @@ contract PikaPerpV2 {
             leverage = (uint256(position.margin).mul(uint256(position.leverage)).add(margin * leverage)).div(uint256(position.margin).add(margin));
             margin = uint256(position.margin).add(margin);
         }
+        require(margin < maxPositionMargin, "!max margin");
 
         positions[positionId] = Position({
             owner: user,
@@ -360,11 +362,20 @@ contract PikaPerpV2 {
 
     }
 
-    // Closes margin from Position with id = positionId
+    // Closes margin from Position with productId and direction
     function closePosition(
-        uint256 positionId,
+        uint256 productId,
+        bool isLong,
         uint256 margin
     ) external {
+        return closePositionWithId(getPositionId(msg.sender, productId, isLong), margin);
+    }
+
+    // Closes position from Position with id = positionId
+    function closePositionWithId(
+        uint256 positionId,
+        uint256 margin
+    ) public {
         // Check params
         require(margin >= MIN_MARGIN, "!margin");
 
@@ -374,7 +385,6 @@ contract PikaPerpV2 {
 
         // Check product
         Product storage product = products[uint256(position.productId)];
-        require(block.timestamp >= uint256(position.timestamp).add(uint256(product.minTradeDuration)), "!duration");
 
         bool isFullClose;
         if (margin >= uint256(position.margin)) {
@@ -386,7 +396,7 @@ contract PikaPerpV2 {
             uint256(product.maxExposure), uint256(product.reserve), margin * position.leverage / 10**8);
 
         bool isLiquidatable;
-        (uint256 pnl, bool pnlIsNegative) = _getPnL(position, price, product.interest);
+        (uint256 pnl, bool pnlIsNegative) = _getPnl(position, price, product.interest);
         if (pnlIsNegative && pnl >= uint256(position.margin).mul(uint256(product.liquidationThreshold)).div(10**4)) {
             margin = uint256(position.margin);
             pnl = uint256(position.margin);
@@ -394,26 +404,27 @@ contract PikaPerpV2 {
             isLiquidatable = true;
         } else {
             // front running protection: if oracle price up change is smaller than threshold and minProfitTime has not passed, the pnl is be set to 0
-            if (!pnlIsNegative && block.timestamp < uint256(position.timestamp).add(minProfitTime) && uint256(position.oraclePrice).mul(uint256(1e8).add(minPriceChange)).div(1e8) <= IOracle(oracle).getPrice(product.feed)) {
+            if (!pnlIsNegative && !_canTakeProfit(position, IOracle(oracle).getPrice(product.feed))) {
                 pnl = 0;
             }
         }
 
-//        if (releaseMargin && !pnlIsNegative) {
-//            pnl = 0;
-//        }
-
         _checkAndUpdateVault(pnl, pnlIsNegative, margin, position.owner);
+
+        uint256 protocolInterest = _getInterest(position, product.interest).mul(protocolRewardRatio).div(10**4);
+        vault.balance -= uint96(protocolInterest);
+        IERC20(usdc).safeTransfer(protocol, protocolInterest.div(10**2));
+
 
         if (position.isLong) {
             if (uint256(product.openInterestLong) >= margin.mul(uint256(position.leverage)).div(10**8)) {
-                product.openInterestLong -= uint64(margin * uint256(position.leverage) / 10**8);
+                product.openInterestLong -= uint64(margin.mul(uint256(position.leverage)).div(10**8));
             } else {
                 product.openInterestLong = 0;
             }
         } else {
             if (uint256(product.openInterestShort) >= margin.mul(uint256(position.leverage)).div(10**8)) {
-                product.openInterestShort -= uint64(margin * uint256(position.leverage) / 10**8);
+                product.openInterestShort -= uint64(margin.mul(uint256(position.leverage)).div(10**8));
             } else {
                 product.openInterestShort = 0;
             }
@@ -515,18 +526,11 @@ contract PikaPerpV2 {
         IERC20(usdc).safeTransfer(positionOwner, margin.div(10**2));
     }
 
-    function getPositionId(
-        address account,
-        uint256 productId,
-        bool isLong
-    ) public pure returns (uint256) {
-        return uint256(keccak256(abi.encodePacked(account, productId, isLong)));
-    }
 
     // Liquidate positionIds
     function liquidatePositions(uint256[] calldata positionIds) external {
 
-        require(msg.sender == owner || allowPublicLiquidator, "!liquidator");
+        require(msg.sender == liquidator || allowPublicLiquidator, "!liquidator");
         uint256 totalLiquidatorReward;
         uint256 totalProtocolReward;
 
@@ -558,9 +562,9 @@ contract PikaPerpV2 {
 
         if (_checkLiquidation(position, price, uint256(product.liquidationThreshold))) {
             uint256 vaultReward;
-            (uint256 pnl, bool pnlIsNegative) = _getPnL(position, price, product.interest);
+            (uint256 pnl, bool pnlIsNegative) = _getPnl(position, price, product.interest);
             if (pnlIsNegative && uint256(position.margin) > pnl) {
-                liquidatorReward = (uint256(position.margin) - pnl) * uint256(product.liquidationBounty) / 10**4;
+                liquidatorReward = (uint256(position.margin).sub(pnl)).mul(uint256(product.liquidationBounty)).div(10**4);
                 protocolReward = (uint256(position.margin).sub(pnl)).mul(protocolRewardRatio).div(10**4);
                 vaultReward = uint256(position.margin).sub(liquidatorReward).sub(protocolReward);
                 vault.balance += uint96(vaultReward);
@@ -622,6 +626,14 @@ contract PikaPerpV2 {
         return products[productId];
     }
 
+    function getPositionId(
+        address account,
+        uint256 productId,
+        bool isLong
+    ) public pure returns (uint256) {
+        return uint256(keccak256(abi.encodePacked(account, productId, isLong)));
+    }
+
     function getPositions(uint256[] calldata positionIds) external view returns(Position[] memory _positions) {
         uint256 length = positionIds.length;
         _positions = new Position[](length);
@@ -641,6 +653,20 @@ contract PikaPerpV2 {
     }
 
     // Internal methods
+
+    function _canTakeProfit(
+        Position memory position,
+        uint256 oraclePrice
+    ) internal view returns(bool) {
+        if (block.timestamp > uint256(position.timestamp).add(minProfitTime)) {
+            return true;
+        } else if (position.isLong && oraclePrice > uint256(position.oraclePrice).mul(uint256(1e4).add(minPriceChange)).div(1e4)) {
+            return true;
+        } else if (!position.isLong && oraclePrice < uint256(position.oraclePrice).mul(uint256(1e4).sub(minPriceChange)).div(1e4)) {
+            return true;
+        }
+        return false;
+    }
 
     function _calculatePriceWithFee(
         address feed,
@@ -668,7 +694,15 @@ contract PikaPerpV2 {
         }
     }
 
-    function _getPnL(
+    function _getInterest(
+        Position memory position,
+        uint256 interest
+    ) internal view returns(uint256) {
+        return uint256(position.margin).mul(uint256(position.leverage)).mul(interest)
+            .mul(block.timestamp.sub(uint256(position.timestamp))).div(uint256(10**12).mul(360 days));
+    }
+
+    function _getPnl(
         Position memory position,
         uint256 price,
         uint256 interest
@@ -691,19 +725,14 @@ contract PikaPerpV2 {
         }
 
         // Subtract interest from P/L
-        if (block.timestamp >= position.timestamp + 900) {
-
-            uint256 _interest =  uint256(position.margin) * uint256(position.leverage) * interest * (block.timestamp - uint256(position.timestamp)) / (10**12 * 360 days);
-
-            if (pnlIsNegative) {
-                pnl += _interest;
-            } else if (pnl < _interest) {
-                pnl = _interest - pnl;
-                pnlIsNegative = true;
-            } else {
-                pnl -= _interest;
-            }
-
+        uint256 _interest = _getInterest(position, interest);
+        if (pnlIsNegative) {
+            pnl = pnl.add(_interest);
+        } else if (pnl < _interest) {
+            pnl = _interest.sub(pnl);
+            pnlIsNegative = true;
+        } else {
+            pnl = pnl.sub(_interest);
         }
 
         return (pnl, pnlIsNegative);
@@ -771,7 +800,6 @@ contract PikaPerpV2 {
             openInterestLong: 0,
             openInterestShort: 0,
             interest: _product.interest,
-            minTradeDuration: _product.minTradeDuration,
             liquidationThreshold: _product.liquidationThreshold,
             liquidationBounty: _product.liquidationBounty,
             reserve: _product.reserve
@@ -796,7 +824,6 @@ contract PikaPerpV2 {
         product.isActive = _product.isActive;
         product.maxExposure = _product.maxExposure;
         product.interest = _product.interest;
-        product.minTradeDuration = _product.minTradeDuration;
         product.liquidationThreshold = _product.liquidationThreshold;
         product.liquidationBounty = _product.liquidationBounty;
 
@@ -815,12 +842,20 @@ contract PikaPerpV2 {
         emit ProtocolUpdated(protocol);
     }
 
+    function setMaxPositionMargin(uint256 _maxPositionMargin) external onlyOwner {
+        maxPositionMargin = _maxPositionMargin;
+    }
+
     function setCanUserStake(bool _canUserStake) external onlyOwner {
         canUserStake = _canUserStake;
     }
 
     function setAllowPublicLiquidator(bool _allowPublicLiquidator) external onlyOwner {
         allowPublicLiquidator = _allowPublicLiquidator;
+    }
+
+    function setLiquidator(address _liquidator) external onlyOwner {
+        liquidator = _liquidator;
     }
 
     function setOwner(address _owner) external onlyOwner {
