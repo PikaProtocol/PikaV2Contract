@@ -6,6 +6,7 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "../oracle/IOracle.sol";
 import './IPikaPerp.sol';
+import "hardhat/console.sol";
 
 contract PikaPerpV2 {
     using SafeMath for uint256;
@@ -72,7 +73,7 @@ contract PikaPerpV2 {
     address public usdc;
     address public oracle;
     address public protocol;
-    uint256 public MIN_MARGIN = 1000000000; // 10 usdc
+    uint256 public MIN_MARGIN = 5000000000; // 50 usdc
     uint256 public nextStakeId; // Incremental
     uint256 public nextPositionId; // Incremental
     uint256 public protocolRewardRatio = 3000;  // In bps. 100 = 1%
@@ -274,9 +275,6 @@ contract PikaPerpV2 {
         bool isLong,
         uint256 leverage
     ) external returns(uint256 positionId) {
-
-        IERC20(usdc).safeTransferFrom(msg.sender, address(this), margin.div(10**2));
-
         // Check params
         require(margin >= MIN_MARGIN, "!margin");
         require(leverage >= 1 * 10**8, "!leverage");
@@ -286,9 +284,13 @@ contract PikaPerpV2 {
         require(product.isActive, "!product-active");
         require(leverage <= uint256(product.maxLeverage), "!max-leverage");
 
+        // Transfer margin plus fee
+        IERC20(usdc).safeTransferFrom(msg.sender, address(this), (margin.add(_getTradeFee(margin, leverage, uint256(product.fee)))).div(10**2));
+        vault.balance += uint96(_getTradeFee(margin, leverage, uint256(product.fee)));
+
         // Check exposure
         uint256 amount = margin.mul(leverage).div(10**8);
-        uint256 price = _calculatePriceWithFee(product.feed, uint256(product.fee), isLong, product.openInterestLong,
+        uint256 price = _calculatePrice(product.feed, isLong, product.openInterestLong,
             product.openInterestShort, uint256(product.maxExposure), uint256(product.reserve), amount);
 
         if (isLong) {
@@ -365,8 +367,8 @@ contract PikaPerpV2 {
     // Closes margin from Position with productId and direction
     function closePosition(
         uint256 productId,
-        bool isLong,
-        uint256 margin
+        uint256 margin,
+        bool isLong
     ) external {
         return closePositionWithId(getPositionId(msg.sender, productId, isLong), margin);
     }
@@ -392,11 +394,11 @@ contract PikaPerpV2 {
             isFullClose = true;
         }
 
-        uint256 price = _calculatePriceWithFee(product.feed, uint256(product.fee), !position.isLong, product.openInterestLong, product.openInterestShort,
+        uint256 price = _calculatePrice(product.feed, !position.isLong, product.openInterestLong, product.openInterestShort,
             uint256(product.maxExposure), uint256(product.reserve), margin * position.leverage / 10**8);
 
         bool isLiquidatable;
-        (uint256 pnl, bool pnlIsNegative) = _getPnl(position, price, product.interest);
+        (uint256 pnl, bool pnlIsNegative) = _getPnl(position, price, product.fee, product.interest);
         if (pnlIsNegative && pnl >= uint256(position.margin).mul(uint256(product.liquidationThreshold)).div(10**4)) {
             margin = uint256(position.margin);
             pnl = uint256(position.margin);
@@ -414,7 +416,6 @@ contract PikaPerpV2 {
         uint256 protocolInterest = _getInterest(position, product.interest).mul(protocolRewardRatio).div(10**4);
         vault.balance -= uint96(protocolInterest);
         IERC20(usdc).safeTransfer(protocol, protocolInterest.div(10**2));
-
 
         if (position.isLong) {
             if (uint256(product.openInterestLong) >= margin.mul(uint256(position.leverage)).div(10**8)) {
@@ -449,7 +450,6 @@ contract PikaPerpV2 {
         } else {
             position.margin -= uint64(margin);
         }
-
     }
 
     function _checkAndUpdateVault(uint256 pnl, bool pnlIsNegative, uint256 margin, address positionOwner) internal {
@@ -562,7 +562,7 @@ contract PikaPerpV2 {
 
         if (_checkLiquidation(position, price, uint256(product.liquidationThreshold))) {
             uint256 vaultReward;
-            (uint256 pnl, bool pnlIsNegative) = _getPnl(position, price, product.interest);
+            (uint256 pnl, bool pnlIsNegative) = _getPnl(position, price, product.fee, product.interest);
             if (pnlIsNegative && uint256(position.margin) > pnl) {
                 liquidatorReward = (uint256(position.margin).sub(pnl)).mul(uint256(product.liquidationBounty)).div(10**4);
                 protocolReward = (uint256(position.margin).sub(pnl)).mul(protocolRewardRatio).div(10**4);
@@ -634,13 +634,20 @@ contract PikaPerpV2 {
         return uint256(keccak256(abi.encodePacked(account, productId, isLong)));
     }
 
+    function getPosition(
+        address account,
+        uint256 productId,
+        bool isLong
+    ) external view returns(Position memory position) {
+        position = positions[getPositionId(account, productId, isLong)];
+    }
+
     function getPositions(uint256[] calldata positionIds) external view returns(Position[] memory _positions) {
         uint256 length = positionIds.length;
         _positions = new Position[](length);
         for (uint256 i=0; i < length; i++) {
             _positions[i] = positions[positionIds[i]];
         }
-        return _positions;
     }
 
     function getStakes(uint256[] calldata stakeIds) external view returns(Stake[] memory _stakes) {
@@ -668,9 +675,8 @@ contract PikaPerpV2 {
         return false;
     }
 
-    function _calculatePriceWithFee(
+    function _calculatePrice(
         address feed,
-        uint256 fee,
         bool isLong,
         uint256 openInterestLong,
         uint256 openInterestShort,
@@ -684,13 +690,11 @@ contract PikaPerpV2 {
         if (isLong) {
             uint256 slippage = (reserve.mul(reserve).div(reserve.sub(amount)).sub(reserve)).mul(10**8).div(amount);
             slippage = shift >= 0 ? slippage.add(uint256(shift)) : slippage.sub(uint256(-1 * shift).div(2));
-            uint256 price = oraclePrice.mul(slippage).div(10**8);
-            return price.add(price.mul(fee).div(10**4));
+            return oraclePrice.mul(slippage).div(10**8);
         } else {
             uint256 slippage = (reserve.sub(reserve.mul(reserve).div(reserve.add(amount)))).mul(10**8).div(amount);
             slippage = shift >= 0 ? slippage.add(uint256(shift).div(2)) : slippage.sub(uint256(-1 * shift));
-            uint256 price = oraclePrice.mul(slippage).div(10**8);
-            return price.sub(price.mul(fee).div(10**4));
+            return oraclePrice.mul(slippage).div(10**8);
         }
     }
 
@@ -705,6 +709,7 @@ contract PikaPerpV2 {
     function _getPnl(
         Position memory position,
         uint256 price,
+        uint256 fee,
         uint256 interest
     ) internal view returns(uint256 pnl, bool pnlIsNegative) {
 
@@ -724,6 +729,17 @@ contract PikaPerpV2 {
             }
         }
 
+        // Subtract trade fee from P/L
+        uint256 tradeFee = _getTradeFee(uint256(position.margin), uint256(position.leverage), fee);
+        if (pnlIsNegative) {
+            pnl = pnl.add(tradeFee);
+        } else if (pnl < tradeFee) {
+            pnl = tradeFee.sub(pnl);
+            pnlIsNegative = true;
+        } else {
+            pnl = pnl.sub(tradeFee);
+        }
+
         // Subtract interest from P/L
         uint256 _interest = _getInterest(position, interest);
         if (pnlIsNegative) {
@@ -738,9 +754,12 @@ contract PikaPerpV2 {
         return (pnl, pnlIsNegative);
     }
 
-    function _calculateInterest(uint256 amount, uint256 timestamp, uint256 interest) internal view returns (uint256) {
-        if (block.timestamp < timestamp.add(900)) return 0;
-        return amount.mul(interest).mul(block.timestamp.sub(timestamp)).div(10**4 * 360 days);
+    function _getTradeFee(
+        uint256 margin,
+        uint256 leverage,
+        uint256 fee
+    ) internal view returns(uint256) {
+        return margin.mul(leverage).div(10**8).mul(fee).div(10**4);
     }
 
     function _checkLiquidation(
@@ -762,7 +781,6 @@ contract PikaPerpV2 {
         } else {
             return false;
         }
-
     }
 
     // Owner methods
