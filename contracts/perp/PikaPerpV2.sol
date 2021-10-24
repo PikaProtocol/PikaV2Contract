@@ -6,7 +6,6 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "../oracle/IOracle.sol";
 import './IPikaPerp.sol';
-import "hardhat/console.sol";
 
 contract PikaPerpV2 {
     using SafeMath for uint256;
@@ -50,6 +49,7 @@ contract PikaPerpV2 {
         uint16 interest; // For 360 days, in bps. 10% = 1000. 2 bytes
         uint16 liquidationThreshold; // In bps. 8000 = 80%. 2 bytes
         uint16 liquidationBounty; // In bps. 500 = 5%. 2 bytes
+        uint16 minPriceChange; // 1.5%, the minimum oracle price up change for trader to close trade with profit
         uint64 reserve; // Virtual reserve in USDC. Used to calculate slippage
     }
 
@@ -78,7 +78,6 @@ contract PikaPerpV2 {
     uint256 public nextPositionId; // Incremental
     uint256 public protocolRewardRatio = 3000;  // In bps. 100 = 1%
     uint256 public maxShift = 0.003e8; // max shift (shift is used adjust the price to balance the longs and shorts)
-    uint256 minPriceChange = 150; // 1.5%, the minimum oracle price up change for trader to close trade with profit
     uint256 minProfitTime = 12 hours; // the time window where minProfit is effective
     uint256 maxPositionMargin; // for guarded launch
     bool canUserStake = false;
@@ -406,7 +405,7 @@ contract PikaPerpV2 {
             isLiquidatable = true;
         } else {
             // front running protection: if oracle price up change is smaller than threshold and minProfitTime has not passed, the pnl is be set to 0
-            if (!pnlIsNegative && !_canTakeProfit(position, IOracle(oracle).getPrice(product.feed))) {
+            if (!pnlIsNegative && !_canTakeProfit(position, IOracle(oracle).getPrice(product.feed), product.minPriceChange)) {
                 pnl = 0;
             }
         }
@@ -663,7 +662,8 @@ contract PikaPerpV2 {
 
     function _canTakeProfit(
         Position memory position,
-        uint256 oraclePrice
+        uint256 oraclePrice,
+        uint256 minPriceChange
     ) internal view returns(bool) {
         if (block.timestamp > uint256(position.timestamp).add(minProfitTime)) {
             return true;
@@ -758,7 +758,7 @@ contract PikaPerpV2 {
         uint256 margin,
         uint256 leverage,
         uint256 fee
-    ) internal view returns(uint256) {
+    ) internal pure returns(uint256) {
         return margin.mul(leverage).div(10**8).mul(fee).div(10**4);
     }
 
@@ -820,6 +820,7 @@ contract PikaPerpV2 {
             interest: _product.interest,
             liquidationThreshold: _product.liquidationThreshold,
             liquidationBounty: _product.liquidationBounty,
+            minPriceChange: _product.minPriceChange,
             reserve: _product.reserve
         });
 

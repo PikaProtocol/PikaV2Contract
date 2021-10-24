@@ -109,6 +109,7 @@ describe("Trading", () => {
 			1000, // 10% annual interest
 			80 * 100, // 80%
 			50 * 100, // 50%
+			150, // 1.5%, minPriceChange
 			50000000e8 // 50m usdc
 			// "30000000000000000" // 300m usdc
  		]
