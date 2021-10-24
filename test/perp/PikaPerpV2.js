@@ -74,7 +74,7 @@ describe("Trading", () => {
 		addrs = provider.getWallets();
 		owner = addrs[0];
 
-        const usdcContract = await ethers.getContractFactory("SimpleERC20");
+        const usdcContract = await ethers.getContractFactory("TestUSDC");
 		usdc = await usdcContract.deploy();
 		await usdc.mint(owner.address, 100000000000);
 		await usdc.mint(addrs[1].address, 100000000000);
