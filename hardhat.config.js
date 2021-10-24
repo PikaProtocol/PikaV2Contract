@@ -24,6 +24,10 @@ module.exports = {
             url: `https://kovan.infura.io/v3/${infuraApiKey}`,
             accounts: {mnemonic: mnemonic}
         },
+        rinkeby: {
+            url: `https://rinkeby.infura.io/v3/${infuraApiKey}`,
+            accounts: {mnemonic: mnemonic}
+        },
         optimisticKovan: {
             url: 'https://kovan.optimism.io',
             gas: 1000000000,

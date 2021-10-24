@@ -75,7 +75,6 @@ contract PikaPerpV2 {
     address public protocol;
     uint256 public MIN_MARGIN = 5000000000; // 50 usdc
     uint256 public nextStakeId; // Incremental
-    uint256 public nextPositionId; // Incremental
     uint256 public protocolRewardRatio = 3000;  // In bps. 100 = 1%
     uint256 public maxShift = 0.003e8; // max shift (shift is used adjust the price to balance the longs and shorts)
     uint256 minProfitTime = 12 hours; // the time window where minProfit is effective
