@@ -396,7 +396,7 @@ contract PikaPerpV2 {
             uint256(product.maxExposure), uint256(product.reserve), margin * position.leverage / 10**8);
 
         bool isLiquidatable;
-        (uint256 pnl, bool pnlIsNegative) = _getPnl(position, price, product.fee, product.interest);
+        (uint256 pnl, bool pnlIsNegative) = _getPnl(position, price);
         if (pnlIsNegative && pnl >= uint256(position.margin).mul(uint256(product.liquidationThreshold)).div(10**4)) {
             margin = uint256(position.margin);
             pnl = uint256(position.margin);
@@ -409,11 +409,7 @@ contract PikaPerpV2 {
             }
         }
 
-        _checkAndUpdateVault(pnl, pnlIsNegative, margin, position.owner);
-
-        uint256 protocolInterest = _getInterest(position, product.interest).mul(protocolRewardRatio).div(10**4);
-        vault.balance -= uint96(protocolInterest);
-        IERC20(usdc).safeTransfer(protocol, protocolInterest.div(10**2));
+        _checkAndUpdateVault(pnl, pnlIsNegative, position, uint256(product.fee), uint256(product.interest));
 
         if (position.isLong) {
             if (uint256(product.openInterestLong) >= margin.mul(uint256(position.leverage)).div(10**8)) {
@@ -450,20 +446,29 @@ contract PikaPerpV2 {
         }
     }
 
-    function _checkAndUpdateVault(uint256 pnl, bool pnlIsNegative, uint256 margin, address positionOwner) internal {
+    function _checkAndUpdateVault(
+        uint256 pnl,
+        bool pnlIsNegative,
+        Position memory position,
+        uint256 fee,
+        uint256 interest
+    ) internal {
         // Checkpoint vault
         if (uint256(vault.lastCheckpointTime) < block.timestamp - 24 hours) {
             vault.lastCheckpointTime = uint80(block.timestamp);
             vault.lastCheckpointBalance = uint80(vault.balance);
         }
 
+        (pnl, pnlIsNegative) = _getPnlWithFee(pnl, pnlIsNegative, position, fee, interest);
+        bool shouldPayProtocolInterest = true;
         // Update vault
         if (pnlIsNegative) {
-            if (pnl < margin) {
-                IERC20(usdc).safeTransfer(positionOwner, (margin.sub(pnl)).div(10**2));
+            if (pnl < uint256(position.margin)) {
+                IERC20(usdc).safeTransfer(position.owner, (uint256(position.margin).sub(pnl)).div(10**2));
                 vault.balance += uint96(pnl);
             } else {
-                vault.balance += uint96(margin);
+                vault.balance += uint96(position.margin);
+                shouldPayProtocolInterest = false;
             }
 
         } else {
@@ -475,7 +480,13 @@ contract PikaPerpV2 {
             , "!max-drawdown");
 
             vault.balance -= uint96(pnl);
-            IERC20(usdc).safeTransfer(positionOwner, (margin.add(pnl)).div(10**2));
+            IERC20(usdc).safeTransfer(position.owner, (uint256(position.margin).add(pnl)).div(10**2));
+        }
+        // If user margin is not enough to pay interest, protocol will not receive interest from vault.
+        if (shouldPayProtocolInterest) {
+            uint256 protocolInterest = _getInterest(position, interest).mul(protocolRewardRatio).div(10**4);
+            vault.balance -= uint96(protocolInterest);
+            IERC20(usdc).safeTransfer(protocol, protocolInterest.div(10**2));
         }
     }
 
@@ -560,7 +571,7 @@ contract PikaPerpV2 {
 
         if (_checkLiquidation(position, price, uint256(product.liquidationThreshold))) {
             uint256 vaultReward;
-            (uint256 pnl, bool pnlIsNegative) = _getPnl(position, price, product.fee, product.interest);
+            (uint256 pnl, bool pnlIsNegative) = _getPnl(position, price);
             if (pnlIsNegative && uint256(position.margin) > pnl) {
                 liquidatorReward = (uint256(position.margin).sub(pnl)).mul(uint256(product.liquidationBounty)).div(10**4);
                 protocolReward = (uint256(position.margin).sub(pnl)).mul(protocolRewardRatio).div(10**4);
@@ -707,11 +718,8 @@ contract PikaPerpV2 {
 
     function _getPnl(
         Position memory position,
-        uint256 price,
-        uint256 fee,
-        uint256 interest
-    ) internal view returns(uint256 pnl, bool pnlIsNegative) {
-
+        uint256 price
+    ) internal pure returns(uint256 pnl, bool pnlIsNegative) {
         if (position.isLong) {
             if (price >= uint256(position.price)) {
                 pnl = uint256(position.margin).mul(uint256(position.leverage)).mul(price.sub(uint256(position.price))).div(uint256(position.price)).div(10**8);
@@ -727,7 +735,16 @@ contract PikaPerpV2 {
                 pnl =  uint256(position.margin).mul(uint256(position.leverage)).mul(uint256(position.price).sub(price)).div(uint256(position.price)).div(10**8);
             }
         }
+        return (pnl, pnlIsNegative);
+    }
 
+    function _getPnlWithFee(
+        uint256 pnl,
+        bool pnlIsNegative,
+        Position memory position,
+        uint256 fee,
+        uint256 interest
+    ) internal view returns(uint256, bool) {
         // Subtract trade fee from P/L
         uint256 tradeFee = _getTradeFee(uint256(position.margin), uint256(position.leverage), fee);
         if (pnlIsNegative) {
@@ -749,7 +766,6 @@ contract PikaPerpV2 {
         } else {
             pnl = pnl.sub(_interest);
         }
-
         return (pnl, pnlIsNegative);
     }
 
