@@ -5,7 +5,7 @@ const { waffle } = require("hardhat")
 
 const provider = waffle.provider
 
-describe("PKS", function () {
+describe("Pika", function () {
 
   before(async function () {
     this.wallets = provider.getWallets()
@@ -39,6 +39,7 @@ describe("PKS", function () {
     it("setMinter", async function () {
       await this.pika.connect(this.owner).setMinter(this.alice.address)
       await expect(this.pika.connect(this.owner).mint(this.bob.address, "10000000000000000000000")).to.be.revertedWith("mint: only the minter can mint")
+      // expect(await this.pika.expect)
       await this.pika.connect(this.alice).mint(this.bob.address, "10000000000000000000000")
       expect(await this.pika.totalSupply()).to.be.equal("100010000000000000000000000")
       expect(await this.pika.balanceOf(this.bob.address)).to.be.equal("10000000000000000000000")
@@ -48,6 +49,10 @@ describe("PKS", function () {
   describe("test transfer", async function(){
     it("transfer", async function () {
       await this.pika.connect(this.owner).mint(this.alice.address, "10000000000000000000000")
+      await expect(
+          this.pika.connect(this.alice).transfer(this.bob.address, "10000000000000000000000")
+      ).to.be.revertedWith("PIKA::_transferTokens: transfer is not allowed");
+      await this.pika.unlock()
       await this.pika.connect(this.alice).transfer(this.bob.address, "10000000000000000000000")
       expect(await this.pika.balanceOf(this.alice.address)).to.be.equal("0")
       expect(await this.pika.balanceOf(this.bob.address)).to.be.equal("10000000000000000000000")
@@ -56,6 +61,10 @@ describe("PKS", function () {
     it("transferFrom", async function () {
       await this.pika.connect(this.owner).mint(this.alice.address, "10000000000000000000000")
       await this.pika.connect(this.alice).approve(this.owner.address, "10000000000000000000000")
+      await expect(
+        this.pika.connect(this.owner).transferFrom(this.alice.address, this.bob.address, "10000000000000000000000")
+      ).to.be.revertedWith("PIKA::_transferTokens: transfer is not allowed")
+      await this.pika.unlock()
       await this.pika.connect(this.owner).transferFrom(this.alice.address, this.bob.address, "10000000000000000000000")
       expect(await this.pika.balanceOf(this.alice.address)).to.be.equal("0")
       expect(await this.pika.balanceOf(this.bob.address)).to.be.equal("10000000000000000000000")

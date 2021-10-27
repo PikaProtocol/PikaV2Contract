@@ -43,6 +43,7 @@ describe("Staking", function () {
         this.rewardToken2.mint(this.rewardDistributor.address, "10000000000000000000000")
         this.pika.mint(this.stakingAccount1.address, "10000000000000000000000")
         this.pika.mint(this.stakingAccount2.address, "10000000000000000000000")
+        this.pika.unlock();
     })
 
 

@@ -22,6 +22,9 @@ contract Pika {
     /// @notice Address which may mint new tokens
     address public minter;
 
+    /// @notice Flag which indicates whether the transfer is disallowed or not
+    bool lock;
+
     // Allowance amounts on behalf of others
     mapping (address => mapping (address => uint96)) internal allowances;
 
@@ -70,6 +73,10 @@ contract Pika {
     /// @notice The standard EIP-20 approval event
     event Approval(address indexed owner, address indexed spender, uint256 amount);
 
+    //  @notice An event thats emitted when the token transfer is enabled
+    event Unlock(bool lock);
+
+
     /**
      * @notice Construct a new PIKA token
      * @param account The initial account to grant all the tokens
@@ -80,6 +87,7 @@ contract Pika {
         emit Transfer(address(0), account, totalSupply);
         minter = minter_;
         emit MinterChanged(address(0), minter);
+        lock = true;
     }
 
     /**
@@ -219,6 +227,14 @@ contract Pika {
         return true;
     }
 
+    function unlock() external {
+        require(msg.sender == minter, "PIKA::unlock: only the minter can unlock");
+        require(lock, "Transfer has been unlocked");
+        lock = false;
+
+        emit Unlock(lock);
+    }
+
     /**
      * @notice Delegate votes from `msg.sender` to `delegatee`
      * @param delegatee The address to delegate votes to
@@ -314,6 +330,7 @@ contract Pika {
 
         balances[src] = sub96(balances[src], amount, "PIKA::_transferTokens: transfer amount exceeds balance");
         balances[dst] = add96(balances[dst], amount, "PIKA::_transferTokens: transfer amount overflows");
+        require(!lock, "PIKA::_transferTokens: transfer is not allowed");
         emit Transfer(src, dst, amount);
 
         _moveDelegates(delegates[src], delegates[dst], amount);
