@@ -396,7 +396,7 @@ contract PikaPerpV2 {
             uint256(product.maxExposure), uint256(product.reserve), margin * position.leverage / 10**8);
 
         bool isLiquidatable;
-        (uint256 pnl, bool pnlIsNegative) = _getPnl(position, price);
+        (uint256 pnl, bool pnlIsNegative) = _getPnl(position, margin, price);
         if (pnlIsNegative && pnl >= uint256(position.margin).mul(uint256(product.liquidationThreshold)).div(10**4)) {
             margin = uint256(position.margin);
             pnl = uint256(position.margin);
@@ -571,7 +571,7 @@ contract PikaPerpV2 {
 
         if (_checkLiquidation(position, price, uint256(product.liquidationThreshold))) {
             uint256 vaultReward;
-            (uint256 pnl, bool pnlIsNegative) = _getPnl(position, price);
+            (uint256 pnl, bool pnlIsNegative) = _getPnl(position, position.margin, price);
             if (pnlIsNegative && uint256(position.margin) > pnl) {
                 liquidatorReward = (uint256(position.margin).sub(pnl)).mul(uint256(product.liquidationBounty)).div(10**4);
                 protocolReward = (uint256(position.margin).sub(pnl)).mul(protocolRewardRatio).div(10**4);
@@ -718,21 +718,22 @@ contract PikaPerpV2 {
 
     function _getPnl(
         Position memory position,
+        uint256 margin,
         uint256 price
     ) internal pure returns(uint256 pnl, bool pnlIsNegative) {
         if (position.isLong) {
             if (price >= uint256(position.price)) {
-                pnl = uint256(position.margin).mul(uint256(position.leverage)).mul(price.sub(uint256(position.price))).div(uint256(position.price)).div(10**8);
+                pnl = margin.mul(uint256(position.leverage)).mul(price.sub(uint256(position.price))).div(uint256(position.price)).div(10**8);
             } else {
-                pnl =  uint256(position.margin).mul(uint256(position.leverage)).mul(uint256(position.price).sub(price)).div(uint256(position.price)).div(10**8);
+                pnl = margin.mul(uint256(position.leverage)).mul(uint256(position.price).sub(price)).div(uint256(position.price)).div(10**8);
                 pnlIsNegative = true;
             }
         } else {
             if (price > uint256(position.price)) {
-                pnl =  uint256(position.margin).mul(uint256(position.leverage)).mul(price - uint256(position.price)).div(uint256(position.price)).div(10**8);
+                pnl = margin.mul(uint256(position.leverage)).mul(price - uint256(position.price)).div(uint256(position.price)).div(10**8);
                 pnlIsNegative = true;
             } else {
-                pnl =  uint256(position.margin).mul(uint256(position.leverage)).mul(uint256(position.price).sub(price)).div(uint256(position.price)).div(10**8);
+                pnl = margin.mul(uint256(position.leverage)).mul(uint256(position.price).sub(price)).div(uint256(position.price)).div(10**8);
             }
         }
         return (pnl, pnlIsNegative);
