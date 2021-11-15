@@ -669,6 +669,16 @@ contract PikaPerpV2 {
         return _stakes;
     }
 
+    function canLiquidate(
+        uint256 positionId,
+        address feed,
+        uint256 liquidationThreshold
+    ) external view returns(bool) {
+        Position memory position = positions[positionId];
+        uint256 price = IOracle(oracle).getPrice(feed);
+        return _checkLiquidation(position, price, liquidationThreshold);
+    }
+
     // Internal methods
 
     function _canTakeProfit(
