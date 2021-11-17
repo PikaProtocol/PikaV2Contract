@@ -670,13 +670,12 @@ contract PikaPerpV2 {
     }
 
     function canLiquidate(
-        uint256 positionId,
-        address feed,
-        uint256 liquidationThreshold
+        uint256 positionId
     ) external view returns(bool) {
         Position memory position = positions[positionId];
-        uint256 price = IOracle(oracle).getPrice(feed);
-        return _checkLiquidation(position, price, liquidationThreshold);
+        Product storage product = products[uint256(position.productId)];
+        uint256 price = IOracle(oracle).getPrice(product.feed);
+        return _checkLiquidation(position, price, product.liquidationThreshold);
     }
 
     // Internal methods
