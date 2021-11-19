@@ -901,6 +901,10 @@ contract PikaPerpV2 {
         allowPublicLiquidator = _allowPublicLiquidator;
     }
 
+    function setOracle(address _oracle) external onlyOwner {
+        oracle = _oracle;
+    }
+
     function setLiquidator(address _liquidator) external onlyOwner {
         liquidator = _liquidator;
     }
