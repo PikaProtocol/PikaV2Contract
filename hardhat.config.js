@@ -3,7 +3,7 @@ require('@openzeppelin/hardhat-upgrades');
 require("@nomiclabs/hardhat-web3");
 require("@nomiclabs/hardhat-etherscan");
 // require("hardhat-gas-reporter");
-const { infuraApiKey, mnemonic, etherscanApiKey, opkovankey } = require('./secrets.json');
+const { infuraApiKey, mnemonic, etherscanApiKey, opkovankey, opkey } = require('./secrets.json');
 
 // You need to export an object to set up your config
 // Go to https://hardhat.org/config/ to learn more
@@ -33,6 +33,10 @@ module.exports = {
             gas: 1000000000,
             gasPrice: 10000,
             accounts: [`0x${opkovankey}`]
+        },
+        optimistic: {
+            url: 'https://mainnet.optimism.io',
+            accounts: [`0x${opkey}`]
         }
     },
     etherscan: {

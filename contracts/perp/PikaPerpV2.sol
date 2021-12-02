@@ -781,7 +781,7 @@ contract PikaPerpV2 is ReentrancyGuard {
         uint256 margin,
         uint256 leverage,
         uint256 fee
-    ) internal view returns(uint256) {
+    ) internal pure returns(uint256) {
         return margin.mul(leverage).div(10**8).mul(fee).div(10**4);
     }
 
