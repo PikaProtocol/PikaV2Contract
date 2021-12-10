@@ -29,7 +29,6 @@ contract PikaPerpV2 is ReentrancyGuard {
         uint80 lastCheckpointBalance; // Used for max drawdown. 10 bytes
         uint80 lastCheckpointTime; // Used for max drawdown. 10 bytes
         uint32 stakingPeriod; // Time required to lock stake (seconds). 4 bytes
-        uint32 redemptionPeriod; // Duration for redemptions (seconds). 4 bytes
     }
 
     struct Stake {
@@ -94,19 +93,17 @@ contract PikaPerpV2 is ReentrancyGuard {
     Vault private vault;
 
     mapping(uint256 => Product) private products;
-    mapping(uint256 => Stake) private stakes;
+    mapping(address => Stake) private stakes;
     mapping(uint256 => Position) private positions;
 
     // Events
 
     event Staked(
-        uint256 stakeId,
         address indexed user,
         uint256 amount,
         uint256 shares
     );
     event Redeemed(
-        uint256 stakeId,
         address indexed user,
         uint256 amount,
         uint256 shares,
@@ -193,8 +190,7 @@ contract PikaPerpV2 is ReentrancyGuard {
             shares: 0,
             lastCheckpointBalance: 0,
             lastCheckpointTime: uint80(block.timestamp),
-            stakingPeriod: uint32(7 * 24 * 3600),
-            redemptionPeriod: uint32(24 * 3600)
+            stakingPeriod: uint32(7 * 24 * 3600)
         });
     }
 
@@ -213,16 +209,20 @@ contract PikaPerpV2 is ReentrancyGuard {
         vault.shares += uint64(shares);
         address user = msg.sender;
 
-        nextStakeId++;
-        stakes[nextStakeId] = Stake({
-            owner: user,
-            amount: uint64(amount),
-            shares: uint64(shares),
-            timestamp: uint32(block.timestamp)
-        });
+        if (stakes[user].amount == 0) {
+            stakes[user] = Stake({
+                owner: user,
+                amount: uint64(amount),
+                shares: uint64(shares),
+                timestamp: uint32(block.timestamp)
+            });
+        } else {
+            stakes[user].amount += uint64(amount);
+            stakes[user].shares += uint64(shares);
+            stakes[user].timestamp = uint32(block.timestamp);
+        }
 
         emit Staked(
-            nextStakeId,
             user,
             amount,
             shares
@@ -232,7 +232,6 @@ contract PikaPerpV2 is ReentrancyGuard {
 
     // Redeems amount from Stake with id = stakeId
     function redeem(
-        uint256 stakeId,
         uint256 shares
     ) external {
 
@@ -240,8 +239,7 @@ contract PikaPerpV2 is ReentrancyGuard {
 
         address user = msg.sender;
 
-        Stake storage _stake = stakes[stakeId];
-        require(_stake.owner == user, "!owner");
+        Stake storage _stake = stakes[user];
 
         bool isFullRedeem = shares >= uint256(_stake.shares);
         if (isFullRedeem) {
@@ -250,10 +248,7 @@ contract PikaPerpV2 is ReentrancyGuard {
 
         if (user != owner) {
             uint256 timeDiff = block.timestamp.sub(uint256(_stake.timestamp));
-            require(
-                (timeDiff > uint256(vault.stakingPeriod)) &&
-                (timeDiff % uint256(vault.stakingPeriod)) < uint256(vault.redemptionPeriod)
-            , "!period");
+            require(timeDiff > uint256(vault.stakingPeriod), "!period");
         }
 
         uint256 shareBalance = shares.mul(uint256(vault.balance)).div(uint256(vault.shares));
@@ -266,12 +261,11 @@ contract PikaPerpV2 is ReentrancyGuard {
         vault.balance -= uint96(shareBalance);
 
         if (isFullRedeem) {
-            delete stakes[stakeId];
+            delete stakes[user];
         }
         IERC20(token).uniTransfer(user, shareBalance.mul(tokenBase).div(BASE));
 
         emit Redeemed(
-            stakeId,
             user,
             amount,
             shares,
@@ -661,11 +655,11 @@ contract PikaPerpV2 is ReentrancyGuard {
         }
     }
 
-    function getStakes(uint256[] calldata stakeIds) external view returns(Stake[] memory _stakes) {
-        uint256 length = stakeIds.length;
+    function getStakes(address[] calldata stakeOwners) external view returns(Stake[] memory _stakes) {
+        uint256 length = stakeOwners.length;
         _stakes = new Stake[](length);
-        for (uint256 i=0; i < length; i++) {
-            _stakes[i] = stakes[stakeIds[i]];
+        for (uint256 i = 0; i < length; i++) {
+            _stakes[i] = stakes[stakeOwners[i]];
         }
         return _stakes;
     }
@@ -811,11 +805,9 @@ contract PikaPerpV2 is ReentrancyGuard {
     function updateVault(Vault memory _vault) external onlyOwner {
         require(_vault.cap > 0, "!cap");
         require(_vault.stakingPeriod > 0, "!stakingPeriod");
-        require(_vault.redemptionPeriod > 0, "!redemptionPeriod");
 
         vault.cap = _vault.cap;
         vault.stakingPeriod = _vault.stakingPeriod;
-        vault.redemptionPeriod = _vault.redemptionPeriod;
 
         emit VaultUpdated(vault);
 
