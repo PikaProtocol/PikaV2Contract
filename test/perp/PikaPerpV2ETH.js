@@ -165,8 +165,7 @@ describe("Trading", () => {
 			// console.log(margin*1e10, fee*1e10*0.7)
 			// console.log("current contract balance", (await provider.getBalance(trading.address)).toString())
 			assertAlmostEqual(await provider.getBalance(user), (balance_user - margin*1e10 - fee*1e10).toLocaleString('fullwide', {useGrouping:false}))
-			assertAlmostEqual(await provider.getBalance(trading.address), (parseFloat(balance_contract) + margin*1e10 + fee*1e10*0.7).toLocaleString('fullwide', {useGrouping:false}))
-
+			assertAlmostEqual(await provider.getBalance(trading.address), (parseFloat(balance_contract) + margin*1e10 + fee*1e10).toLocaleString('fullwide', {useGrouping:false}))
 			// // Check user positions
 			const position1 = (await trading.getPositions([positionId]))[0];
 			expect(position1.productId).to.equal(productId);
@@ -216,7 +215,7 @@ describe("Trading", () => {
 			expect(await tx1).to.emit(trading, "NewPosition").withArgs(positionId, user, productId, true, price1.toString(), getOraclePrice(oracle.address), margin.toString(), leverage.toString(), margin*leverage/1e8*0.001);
 			// Check balances
 			let newUserBalance = balance_user - margin*1e10 - fee*1e10;
-			let newContractBalance = parseFloat(balance_contract) + margin*1e10 + fee*1e10*0.7;
+			let newContractBalance = parseFloat(balance_contract) + margin*1e10 + fee*1e10;
 			assertAlmostEqual(await provider.getBalance(user), newUserBalance.toLocaleString('fullwide', {useGrouping:false}))
 			assertAlmostEqual(await provider.getBalance(trading.address), newContractBalance.toLocaleString('fullwide', {useGrouping:false}))
 
@@ -258,7 +257,7 @@ describe("Trading", () => {
 
 			// Check balances
 			assertAlmostEqual(await provider.getBalance(user), (balance_user - margin*1e10 - fee*1e10).toLocaleString('fullwide', {useGrouping:false}))
-			assertAlmostEqual(await provider.getBalance(trading.address), (parseFloat(balance_contract) + margin*1e10 + fee*1e10*0.7).toLocaleString('fullwide', {useGrouping:false}))
+			assertAlmostEqual(await provider.getBalance(trading.address), (parseFloat(balance_contract) + margin*1e10 + fee*1e10).toLocaleString('fullwide', {useGrouping:false}))
 
 			// // Check user positions
 			const position1 = (await trading.getPositions([positionId]))[0];
