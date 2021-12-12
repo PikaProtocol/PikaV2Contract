@@ -159,7 +159,7 @@ describe("Trading", () => {
 
 			// 1. open long
 			const price1 = _calculatePrice(oracle.address, true, 0, 0, parseFloat((await trading.getVault()).balance), 50000000e8, margin*leverage/1e8);
-			console.log("price 1", price1);
+			// console.log("price 1", price1);
 			let fee = margin*leverage/1e8*0.001;
 			const tx1 = await trading.connect(addrs[userId]).openPosition(productId, margin, true, leverage.toString());
 			const receipt = await provider.getTransactionReceipt(tx1.hash);
@@ -167,15 +167,15 @@ describe("Trading", () => {
 			let positionId = getPositionId(user, productId, true);
 			expect(await tx1).to.emit(trading, "NewPosition").withArgs(positionId, user, productId, true, price1.toString(), getOraclePrice(oracle.address), margin.toString(), leverage.toString(), margin*leverage/1e8*0.001);
 			// Check balances
-			console.log(await usdc.balanceOf(trading.address), (balance_contract.add(BigNumber.from(margin/100 + fee/100*0.7))))
+			// console.log(await usdc.balanceOf(trading.address), (balance_contract.add(BigNumber.from(margin/100 + fee/100*0.7))))
 			expect(await usdc.balanceOf(user)).to.be.equal((balance_user - margin/100 - fee/100).toLocaleString('fullwide', {useGrouping:false}))
 
 			assertAlmostEqual(await usdc.balanceOf(user), (balance_user - margin/100 - fee/100).toLocaleString('fullwide', {useGrouping:false}))
 			assertAlmostEqual(await usdc.balanceOf(trading.address), (balance_contract.add(BigNumber.from(margin/100 + fee/100))))
-			console.log("fee", (await trading.pendingProtocolReward()).toString(), fee/100*0.2)
+			// console.log("fee", (await trading.pendingProtocolReward()).toString(), fee/100*0.2)
 			assertAlmostEqual(await trading.pendingProtocolReward(), fee*0.2);
 			assertAlmostEqual(await trading.pendingPikaReward(), fee*0.3);
-			// assertAlmostEqual(await trading.pendingVaultReward(), fee*0.5);
+			assertAlmostEqual(await trading.pendingVaultReward(), fee*0.5);
 
 			// // Check user positions
 			const position1 = (await trading.getPositions([positionId]))[0];

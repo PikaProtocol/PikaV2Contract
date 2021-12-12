@@ -89,6 +89,7 @@ contract PikaPerpV2 is ReentrancyGuard {
     uint256 public utilizationMultiplier = 10000; // exposure multiplier
     uint256 public pendingProtocolReward; // protocol reward collected
     uint256 public pendingPikaReward; // pika reward collected
+    uint256 public pendingVaultReward; // vault reward collected
     address public protocolRewardDistributor;
     address public pikaRewardDistributor;
     address public vaultRewardDistributor;
@@ -304,7 +305,7 @@ contract PikaPerpV2 is ReentrancyGuard {
         IERC20(token).uniTransferFromSenderToThis((margin.add(tradeFee)).mul(tokenBase).div(BASE));
         pendingProtocolReward = pendingProtocolReward.add(tradeFee.mul(protocolRewardRatio).div(10**4));
         pendingPikaReward = pendingPikaReward.add(tradeFee.mul(pikaRewardRatio).div(10**4));
-        vault.balance += uint96(tradeFee.mul(10**4 - protocolRewardRatio - pikaRewardRatio).div(10**4));
+        pendingVaultReward = pendingVaultReward.add(tradeFee.mul(10**4 - protocolRewardRatio - pikaRewardRatio).div(10**4));
 
         // Check exposure
         uint256 amount = margin.mul(leverage).div(BASE);
@@ -476,8 +477,7 @@ contract PikaPerpV2 is ReentrancyGuard {
 
         pendingProtocolReward = pendingProtocolReward.add((tradeFee.add(interestFee)).mul(protocolRewardRatio).div(10**4));
         pendingPikaReward = pendingPikaReward.add((tradeFee.add(interestFee)).mul(pikaRewardRatio).div(10**4));
-        // vault reward
-        vault.balance += uint96((tradeFee.add(interestFee)).mul(10**4 - protocolRewardRatio - pikaRewardRatio).div(10**4));
+        pendingVaultReward = pendingVaultReward.add((tradeFee.add(interestFee)).mul(10**4 - protocolRewardRatio - pikaRewardRatio).div(10**4));
 
         return tradeFee.add(interestFee);
     }
@@ -548,8 +548,8 @@ contract PikaPerpV2 is ReentrancyGuard {
                 remainingReward = (uint256(position.margin).sub(_pnl).sub(liquidatorReward));
                 pendingProtocolReward = pendingProtocolReward.add(remainingReward.mul(protocolRewardRatio).div(10**4));
                 pendingPikaReward = pendingPikaReward.add(remainingReward.mul(pikaRewardRatio).div(10**4));
-                // add (pnl + vault reward) to vault balance
-                vault.balance += uint96(_pnl.add(remainingReward.mul(10**4 - protocolRewardRatio - pikaRewardRatio).div(10**4)));
+                pendingVaultReward = pendingVaultReward.add(remainingReward.mul(10**4 - protocolRewardRatio - pikaRewardRatio).div(10**4));
+                vault.balance += uint96(_pnl);
             } else {
                 vault.balance += uint96(position.margin);
             }
@@ -634,6 +634,16 @@ contract PikaPerpV2 is ReentrancyGuard {
         return _pendingPikaReward;
     }
 
+    function distributeVaultReward() external returns(uint256) {
+        require(msg.sender == vaultRewardDistributor, "!distributor");
+        uint256 _pendingVaultReward = pendingProtocolReward;
+        if (pendingVaultReward > 0) {
+            pendingProtocolReward = 0;
+            IERC20(token).uniTransfer(vaultRewardDistributor, _pendingVaultReward.mul(tokenBase).div(BASE));
+        }
+        return _pendingVaultReward;
+    }
+
     // Getters
 
     function getPendingPikaReward() external view returns(uint256) {
@@ -642,6 +652,10 @@ contract PikaPerpV2 is ReentrancyGuard {
 
     function getPendingProtocolReward() external view returns(uint256) {
         return pendingProtocolReward;
+    }
+
+    function getPendingVaultReward() external view returns(uint256) {
+        return pendingVaultReward;
     }
 
     function getVault() external view returns(Vault memory) {

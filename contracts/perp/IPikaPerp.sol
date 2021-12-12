@@ -11,4 +11,5 @@ interface IPikaPerp {
     function distributeVaultReward() external returns(uint256);
     function getPendingPikaReward() external view returns(uint256);
     function getPendingProtocolReward() external view returns(uint256);
+    function getPendingVaultReward() external view returns(uint256);
 }
