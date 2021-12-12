@@ -86,12 +86,13 @@ contract PikaPerpV2 is ReentrancyGuard {
     uint256 public maxPositionMargin; // for guarded launch
     uint256 public totalWeight; // total exposure weights of all product
     uint256 public exposureMultiplier = 10000; // exposure multiplier
+    uint256 public utilizationMultiplier = 10000; // exposure multiplier
     uint256 public pendingProtocolReward; // protocol reward collected
     uint256 public pendingPikaReward; // pika reward collected
-    uint256 public pendingVaultReward; // vault reward collected
     address public protocolRewardDistributor;
     address public pikaRewardDistributor;
     address public vaultRewardDistributor;
+    uint256 public totalOpenInterest;
     uint256 public constant BASE_DECIMALS = 8;
     uint256 public constant BASE = 10**BASE_DECIMALS;
     bool canUserStake = false;
@@ -256,6 +257,7 @@ contract PikaPerpV2 is ReentrancyGuard {
         }
 
         uint256 shareBalance = shares.mul(uint256(vault.balance)).div(uint256(vault.shares));
+
         uint256 amount = shares.mul(_stake.amount).div(uint256(_stake.shares));
 
         _stake.amount -= uint64(amount);
@@ -263,6 +265,8 @@ contract PikaPerpV2 is ReentrancyGuard {
         vault.staked -= uint64(amount);
         vault.shares -= uint64(shares);
         vault.balance -= uint96(shareBalance);
+
+        require(totalOpenInterest <= uint256(vault.balance).mul(utilizationMultiplier).div(10**4), "!utilized");
 
         if (isFullRedeem) {
             delete stakes[user];
@@ -300,7 +304,7 @@ contract PikaPerpV2 is ReentrancyGuard {
         IERC20(token).uniTransferFromSenderToThis((margin.add(tradeFee)).mul(tokenBase).div(BASE));
         pendingProtocolReward = pendingProtocolReward.add(tradeFee.mul(protocolRewardRatio).div(10**4));
         pendingPikaReward = pendingPikaReward.add(tradeFee.mul(pikaRewardRatio).div(10**4));
-        pendingVaultReward = pendingVaultReward.add(tradeFee.mul(10**4 - protocolRewardRatio - pikaRewardRatio).div(10**4));
+        vault.balance += uint96(tradeFee.mul(10**4 - protocolRewardRatio - pikaRewardRatio).div(10**4));
 
         // Check exposure
         uint256 amount = margin.mul(leverage).div(BASE);
@@ -315,7 +319,7 @@ contract PikaPerpV2 is ReentrancyGuard {
         if (position.margin > 0) {
             price = (uint256(position.margin).mul(position.leverage).mul(uint256(position.price)).add(margin.mul(leverage).mul(price))).div(
                 uint256(position.margin).mul(position.leverage).add(margin.mul(leverage)));
-            leverage = (uint256(position.margin).mul(uint256(position.leverage)).add(margin * leverage)).div(uint256(position.margin).add(margin));
+            leverage = (uint256(position.margin).mul(uint256(position.leverage)).add(margin.mul(leverage))).div(uint256(position.margin).add(margin));
             margin = uint256(position.margin).add(margin);
         }
         require(margin < maxPositionMargin, "!max margin");
@@ -472,7 +476,8 @@ contract PikaPerpV2 is ReentrancyGuard {
 
         pendingProtocolReward = pendingProtocolReward.add((tradeFee.add(interestFee)).mul(protocolRewardRatio).div(10**4));
         pendingPikaReward = pendingPikaReward.add((tradeFee.add(interestFee)).mul(pikaRewardRatio).div(10**4));
-        pendingVaultReward = pendingVaultReward.add((tradeFee.add(interestFee)).mul(10**4 - protocolRewardRatio - pikaRewardRatio).div(10**4));
+        // vault reward
+        vault.balance += uint96((tradeFee.add(interestFee)).mul(10**4 - protocolRewardRatio - pikaRewardRatio).div(10**4));
 
         return tradeFee.add(interestFee);
     }
@@ -482,26 +487,12 @@ contract PikaPerpV2 is ReentrancyGuard {
         Position storage position = positions[positionId];
         require(position.margin > 0, "!position");
 
-        Product storage product = products[position.productId];
-
         uint256 margin = position.margin;
         address positionOwner = position.owner;
 
         uint256 amount = margin.mul(uint256(position.leverage)).div(10**8);
-        // Set exposure
-        if (position.isLong) {
-            if (product.openInterestLong >= amount) {
-                product.openInterestLong -= uint64(amount);
-            } else {
-                product.openInterestLong = 0;
-            }
-        } else {
-            if (product.openInterestShort >= amount) {
-                product.openInterestShort -= uint64(amount);
-            } else {
-                product.openInterestShort = 0;
-            }
-        }
+
+        _updateOpenInterest(uint256(position.productId), amount, position.isLong, false);
 
         emit ClosePosition(
             positionId,
@@ -557,8 +548,8 @@ contract PikaPerpV2 is ReentrancyGuard {
                 remainingReward = (uint256(position.margin).sub(_pnl).sub(liquidatorReward));
                 pendingProtocolReward = pendingProtocolReward.add(remainingReward.mul(protocolRewardRatio).div(10**4));
                 pendingPikaReward = pendingPikaReward.add(remainingReward.mul(pikaRewardRatio).div(10**4));
-                pendingVaultReward = pendingVaultReward.add(remainingReward.mul(10**4 - protocolRewardRatio - pikaRewardRatio).div(10**4));
-                vault.balance += uint96(_pnl);
+                // add (pnl + vault reward) to vault balance
+                vault.balance += uint96(_pnl.add(remainingReward.mul(10**4 - protocolRewardRatio - pikaRewardRatio).div(10**4)));
             } else {
                 vault.balance += uint96(position.margin);
             }
@@ -595,6 +586,8 @@ contract PikaPerpV2 is ReentrancyGuard {
     function _updateOpenInterest(uint256 productId, uint256 amount, bool isLong, bool isIncrease) internal {
         Product storage product = products[productId];
         if (isIncrease) {
+            totalOpenInterest = totalOpenInterest.add(amount);
+            require(totalOpenInterest <= uint256(vault.balance).mul(utilizationMultiplier).div(10**4), "!maxOpenInterest");
             uint256 maxExposure = uint256(vault.balance).mul(uint256(product.weight)).mul(exposureMultiplier).div(uint256(totalWeight)).div(10**4);
             if (isLong) {
                 product.openInterestLong += uint64(amount);
@@ -604,6 +597,7 @@ contract PikaPerpV2 is ReentrancyGuard {
                 require(uint256(product.openInterestShort) <= uint256(maxExposure).add(uint256(product.openInterestLong)), "!exposure-short");
             }
         } else {
+            totalOpenInterest = totalOpenInterest.sub(amount);
             if (isLong) {
                 if (uint256(product.openInterestLong) >= amount) {
                     product.openInterestLong -= uint64(amount);
@@ -620,31 +614,35 @@ contract PikaPerpV2 is ReentrancyGuard {
         }
     }
 
-    function distributeProtocolReward() external {
+    function distributeProtocolReward() external returns(uint256) {
         require(msg.sender == protocolRewardDistributor, "!distributor");
+        uint256 _pendingProtocolReward = pendingProtocolReward;
         if (pendingProtocolReward > 0) {
-            IERC20(token).uniTransfer(protocolRewardDistributor, pendingProtocolReward.mul(tokenBase).div(BASE));
             pendingProtocolReward = 0;
+            IERC20(token).uniTransfer(protocolRewardDistributor, _pendingProtocolReward.mul(tokenBase).div(BASE));
         }
+        return _pendingProtocolReward;
     }
 
-    function distributePikaReward() external {
+    function distributePikaReward() external returns(uint256) {
         require(msg.sender == pikaRewardDistributor, "!distributor");
+        uint256 _pendingPikaReward = pendingPikaReward;
         if (pendingPikaReward > 0) {
-            IERC20(token).uniTransfer(pikaRewardDistributor, pendingPikaReward.mul(tokenBase).div(BASE));
             pendingPikaReward = 0;
+            IERC20(token).uniTransfer(pikaRewardDistributor, _pendingPikaReward.mul(tokenBase).div(BASE));
         }
-    }
-
-    function distributeVaultReward() external {
-        require(msg.sender == vaultRewardDistributor, "!distributor");
-        if (pendingVaultReward > 0) {
-            IERC20(token).uniTransfer(vaultRewardDistributor, pendingVaultReward.mul(tokenBase).div(BASE));
-            pendingVaultReward = 0;
-        }
+        return _pendingPikaReward;
     }
 
     // Getters
+
+    function getPendingPikaReward() external view returns(uint256) {
+        return pendingPikaReward;
+    }
+
+    function getPendingProtocolReward() external view returns(uint256) {
+        return pendingProtocolReward;
+    }
 
     function getVault() external view returns(Vault memory) {
         return vault;
@@ -678,7 +676,11 @@ contract PikaPerpV2 is ReentrancyGuard {
         }
     }
 
-    function getStakeShare(address stakeOwner) external view returns(uint256) {
+    function getTotalShare() external view returns(uint256) {
+        return uint256(vault.shares);
+    }
+
+    function getShare(address stakeOwner) external view returns(uint256) {
         return uint256(stakes[stakeOwner].shares);
     }
 

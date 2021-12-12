@@ -175,7 +175,7 @@ describe("Trading", () => {
 			console.log("fee", (await trading.pendingProtocolReward()).toString(), fee/100*0.2)
 			assertAlmostEqual(await trading.pendingProtocolReward(), fee*0.2);
 			assertAlmostEqual(await trading.pendingPikaReward(), fee*0.3);
-			assertAlmostEqual(await trading.pendingVaultReward(), fee*0.5);
+			// assertAlmostEqual(await trading.pendingVaultReward(), fee*0.5);
 
 			// // Check user positions
 			const position1 = (await trading.getPositions([positionId]))[0];
@@ -230,7 +230,7 @@ describe("Trading", () => {
 			assertAlmostEqual(await usdc.balanceOf(user), newUserBalance.toLocaleString('fullwide', {useGrouping:false}))
 			assertAlmostEqual(await usdc.balanceOf(trading.address), newContractBalance)
 
-			// // Check user positions
+			// Check user positions
 			const position1 = (await trading.getPositions([positionId]))[0];
 			expect(position1.productId).to.equal(productId);
 			expect(position1.owner).to.equal(user);
