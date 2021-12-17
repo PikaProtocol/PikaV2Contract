@@ -71,7 +71,7 @@ function assertAlmostEqual(actual, expected, accuracy = 10000000) {
 
 describe("Trading", () => {
 
-	let trading, addrs = [], owner, oracle, usdc;
+	let trading, addrs = [], owner, oracle, usdc, pika, pikaStaking, vaultFeeReward, vaultTokenReward, rewardToken;
 
 	before(async () => {
 
@@ -83,6 +83,26 @@ describe("Trading", () => {
 
 		const tradingContract = await ethers.getContractFactory("PikaPerpV2");
 		trading = await tradingContract.deploy("0x0000000000000000000000000000000000000000", 18, oracle.address, 1000000);
+
+        const pikaContract = await ethers.getContractFactory("Pika");
+        pika = await pikaContract.deploy(owner.address, owner.address);
+        await pika.unlock();
+        const pikaStakingContract = await ethers.getContractFactory("PikaStaking");
+        pikaStaking = await pikaStakingContract.deploy(pika.address, "0x0000000000000000000000000000000000000000", 18);
+        const vaultFeeRewardContract = await ethers.getContractFactory("VaultFeeReward");
+        vaultFeeReward = await vaultFeeRewardContract.deploy("0x0000000000000000000000000000000000000000", 18);
+        const mockRewardTokenContract = await ethers.getContractFactory("TestUSDC");
+        rewardToken = await mockRewardTokenContract.deploy();
+        await rewardToken.mint(owner.address, 100000000000);
+        const vaultTokenRewardContract = await ethers.getContractFactory("VaultTokenReward");
+        vaultTokenReward = await vaultTokenRewardContract.deploy(owner.address, rewardToken.address, trading.address);
+
+        await trading.setDistributors(addrs[2].address, pikaStaking.address, vaultFeeReward.address, vaultTokenReward.address);
+        await pikaStaking.setPikaPerp(trading.address);
+        await vaultFeeReward.setPikaPerp(trading.address);
+        await pika.approve(pikaStaking.address, "1000000000000000000000000000");
+        await pika.transfer(addrs[1].address, "10000000000000000000000000")
+        await pika.connect(addrs[1]).approve(pikaStaking.address, "1000000000000000000000000000");
 
 		let v = [
 			100000000000, //1k eth cap
@@ -363,5 +383,131 @@ describe("Trading", () => {
 			// const userBalanceNow = await provider.getBalance(owner.address);
 			// assertAlmostEqual(userBalanceNow.sub(userBalanceStart), vault1.balance.div(100).div(2))
 		})
+
+		it(`pika staking`, async () => {
+			// staking
+			let fee = margin*leverage/1e8*0.001;
+			const pendingPikaReward = await trading.getPendingPikaReward();
+			await pikaStaking.connect(owner).stake("100000000000000000000");
+			expect(await provider.getBalance(pikaStaking.address)).to.be.equal(pendingPikaReward);
+			expect(await trading.getPendingPikaReward()).to.be.equal(0);
+			await trading.connect(addrs[userId]).openPosition(productId, margin, true, leverage.toString(), {from: addrs[1].address, value:  (margin*1e10 + fee*2e10).toString(), gasPrice: gasPrice});
+			await pikaStaking.connect(owner).stake("100000000000000000000");
+			expect((await pikaStaking.getClaimableReward(owner.address)).toString()).to.be.equal("3000000000000000");
+			await trading.connect(addrs[userId]).openPosition(productId, margin, true, leverage.toString(), {from: addrs[userId].address, value:  (margin*1e10 + fee*2e10).toString(), gasPrice: gasPrice});
+			await pikaStaking.connect(addrs[1]).stake("100000000000000000000");
+			expect((await pikaStaking.getClaimableReward(owner.address)).toString()).to.be.equal("6000000000000000");
+			expect(await pikaStaking.totalSupply()).to.be.equal("300000000000000000000");
+
+			await trading.connect(addrs[userId]).openPosition(productId, margin, true, leverage.toString(), {from: addrs[userId].address, value:  (margin*1e10 + fee*2e10).toString(), gasPrice: gasPrice});
+			expect((await pikaStaking.getClaimableReward(owner.address)).toString()).to.be.equal("8000000000000000");
+			expect((await pikaStaking.connect(addrs[1]).getClaimableReward(addrs[1].address)).toString()).to.be.equal("1000000000000000");
+			// claim
+			const ethBeforeClaim = await provider.getBalance(owner.address);
+			await pikaStaking.connect(owner).claimReward();
+			assertAlmostEqual((await provider.getBalance(owner.address)).sub(ethBeforeClaim), "8000000000000000", 10);
+			// withdraw
+			const pikaBalanceBefore = await pika.balanceOf(addrs[1].address);
+			await pikaStaking.connect(addrs[1]).withdraw("100000000000000000000");
+			expect((await pika.balanceOf(addrs[1].address)).sub(pikaBalanceBefore), "100000000000000000000");
+			const ethBeforeClaim2 = await provider.getBalance(addrs[1].address);
+			await pikaStaking.connect(addrs[1]).claimReward();
+			assertAlmostEqual((await provider.getBalance(addrs[1].address)).sub(ethBeforeClaim2), "1000000000000000", 1);
+
+			await trading.connect(addrs[userId]).closePosition(productId, margin*3, true);
+		})
+
+
+        it(`vault fee reward`, async () => {
+            // redeem all
+            let fee = margin*leverage/1e8*0.001;
+            await provider.send("evm_increaseTime", [3600])
+            const startVaultFeeContractETH = await provider.getBalance(vaultFeeReward.address);
+            const pendingVaultReward = await trading.getPendingVaultReward();
+            await trading.redeem((await trading.getShare(owner.address)));
+            await trading.connect(addrs[1]).redeem(await trading.getShare(addrs[1].address));
+            expect((await provider.getBalance(vaultFeeReward.address)).sub(startVaultFeeContractETH)).to.be.equal(pendingVaultReward)
+
+            // stake
+            expect(await trading.getPendingVaultReward()).to.be.equal(0);
+            // console.log("pendingPikaReward", (await trading.getPendingPikaReward()).toString());
+            const startOwnerClaimableReward = await vaultFeeReward.getClaimableReward(owner.address);
+            const startAddress1ClaimableReward = await vaultFeeReward.getClaimableReward(addrs[1].address);
+            await trading.connect(owner).stake("10000000000", {from: owner.address, value: "100000000000000000000"});
+            await trading.connect(owner).openPosition(productId, margin, true, leverage.toString(), {from: owner.address, value:  (margin*1e10 + fee*2e10).toString(), gasPrice: gasPrice});
+
+            expect((await vaultFeeReward.getClaimableReward(owner.address)).sub(startOwnerClaimableReward)).to.be.equal("5000000000000000");
+
+            await trading.connect(addrs[1]).stake("10000000000", {from: addrs[1].address, value: "100000000000000000000"});
+            expect((await vaultFeeReward.getClaimableReward(addrs[1].address)).sub(startAddress1ClaimableReward)).to.be.equal("0");
+            expect(await trading.getTotalShare()).to.be.equal("20000000000");
+
+            await trading.connect(addrs[userId]).openPosition(productId, margin, true, leverage.toString(), {from: addrs[userId].address, value:  (margin*1e10 + fee*2e10).toString(), gasPrice: gasPrice});
+
+            expect((await vaultFeeReward.getClaimableReward(owner.address)).sub(startOwnerClaimableReward)).to.be.equal("7500000000000000");
+            expect((await vaultFeeReward.getClaimableReward(addrs[1].address)).sub(startAddress1ClaimableReward)).to.be.equal("2500000000000000");
+            const ethBeforeClaim = await provider.getBalance(owner.address);
+            const currentClaimableReward = await vaultFeeReward.getClaimableReward(owner.address);
+            await vaultFeeReward.connect(owner).claimReward();
+            assertAlmostEqual(((await provider.getBalance(owner.address)).sub(ethBeforeClaim)), currentClaimableReward, 100);
+
+            // redeem
+            const shareBefore = await trading.getShare(addrs[1].address);
+            await provider.send("evm_increaseTime", [3600])
+            await trading.connect(addrs[1]).redeem(shareBefore);
+            expect(await trading.getShare(addrs[1].address)).to.be.equal(0);
+            const ethBeforeClaim2 = await provider.getBalance(addrs[1].address);
+            const currentClaimableRewardAddrs1 = await vaultFeeReward.getClaimableReward(addrs[1].address);
+            await vaultFeeReward.connect(addrs[1]).claimReward();
+            // assertAlmostEqual(((await provider.getBalance(addrs[1].address)).sub(ethBeforeClaim2)), currentClaimableRewardAddrs1, 100);
+            assertAlmostEqual(((await provider.getBalance(addrs[1].address)).sub(ethBeforeClaim2)), currentClaimableRewardAddrs1, 10);
+            //
+            await trading.connect(owner).closePosition(productId, margin, true);
+            await trading.connect(addrs[userId]).closePosition(productId, margin, true);
+            await trading.connect(owner).redeem((await trading.getShare(owner.address)));
+        })
+
+        it(`vault token reward`, async () => {
+            const account1 = addrs[3]
+            const account2 = addrs[4]
+
+            // account1 stake
+            await trading.connect(account1).stake("50000000000", {from: account1.address, value: "500000000000000000000"});
+            expect(await vaultTokenReward.balanceOf(account1.address)).to.be.equal("500000000000000000000")
+
+            await rewardToken.mint(owner.address, "1000000000000000000000");
+            await rewardToken.connect(owner).transfer(vaultTokenReward.address, "1000000000000000000000");
+            await vaultTokenReward.connect(owner).notifyRewardAmount("1000000000000000000000");
+            const rewardRate = await vaultTokenReward.rewardRate();
+
+            // 1 hour later stakingAccount1 check rewards
+            await provider.send("evm_increaseTime", [3600])
+            await provider.send("evm_mine")
+            const account1Earned = await vaultTokenReward.earned(account1.address);
+            assertAlmostEqual(account1Earned, rewardRate.mul(3600), 1000)
+
+            // account2 stake the same amount as stakingAccount1's current staked balance
+			await trading.connect(account2).stake("50000000000", {from: account2.address, value: "500000000000000000000"});
+            expect(await vaultTokenReward.balanceOf(account2.address)).to.be.equal("500000000000000000000")
+            expect(await trading.getTotalShare()).to.be.equal("100000000000")
+
+            // 1 hour later check rewards
+            await provider.send("evm_increaseTime", [3600])
+            await provider.send("evm_mine")
+            const newRewardRate = await vaultTokenReward.rewardRate();
+            const newAccount1Earned = await vaultTokenReward.earned(account1.address)
+            const account2Earned = await vaultTokenReward.earned(account2.address)
+            assertAlmostEqual(newAccount1Earned.sub(account1Earned), newRewardRate.mul(3600).div(2), 100)
+            assertAlmostEqual(account2Earned, newRewardRate.mul(3600).div(2), 100)
+
+            // claim reward for account1
+            await vaultTokenReward.connect(account1).getReward()
+            assertAlmostEqual(await rewardToken.balanceOf(account1.address), newAccount1Earned, 1000)
+
+            // claim reward for account2
+            await vaultTokenReward.connect(account2).getReward()
+            assertAlmostEqual(await rewardToken.balanceOf(account2.address), account2Earned, 1000)
+            expect(await trading.getTotalShare()).to.be.equal("100000000000")
+        })
 	});
 });

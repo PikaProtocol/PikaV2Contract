@@ -37,9 +37,8 @@ contract VaultFeeReward is ReentrancyGuard, Pausable {
     event Staked(address indexed user, uint256 amount);
     event Withdrawn(address indexed user, uint256 amount);
 
-    constructor(address _stakingToken, address _rewardToken, uint256 _rewardTokenDecimal) {
+    constructor(address _rewardToken, uint256 _rewardTokenDecimal) {
         owner = msg.sender;
-        stakingToken = _stakingToken;
         rewardToken = _rewardToken;
         rewardTokenDecimal = _rewardTokenDecimal;
     }
@@ -69,9 +68,9 @@ contract VaultFeeReward is ReentrancyGuard, Pausable {
         previousRewardPerToken[account] = cumulativeRewardPerTokenStored;
     }
 
-    function claimReward() external {
+    function claimReward() public returns(uint256 rewardToSend) {
         updateReward(msg.sender);
-        uint256 rewardToSend = claimableReward[msg.sender];
+        rewardToSend = claimableReward[msg.sender];
         claimableReward[msg.sender] = 0;
 
         if (rewardToSend > 0) {
@@ -84,8 +83,13 @@ contract VaultFeeReward is ReentrancyGuard, Pausable {
         }
     }
 
-    function getClaimableReward() external view returns(uint256) {
-        uint256 currentClaimableReward = claimableReward[msg.sender];
+    function reinvest() external {
+        uint256 claimedReward = claimReward();
+        IPikaPerp(pikaPerp).stake(claimedReward * BASE / rewardTokenDecimal);
+    }
+
+    function getClaimableReward(address account) external view returns(uint256) {
+        uint256 currentClaimableReward = claimableReward[account];
         uint256 supply = IPikaPerp(pikaPerp).getTotalShare();
         if (supply == 0) return currentClaimableReward;
 
@@ -93,7 +97,7 @@ contract VaultFeeReward is ReentrancyGuard, Pausable {
         uint256 _rewardPerTokenStored = cumulativeRewardPerTokenStored + _pendingReward * PRECISION / supply;
         if (_rewardPerTokenStored == 0) return currentClaimableReward;
 
-        return currentClaimableReward + IPikaPerp(pikaPerp).getShare(msg.sender) * (_rewardPerTokenStored - previousRewardPerToken[msg.sender]) / PRECISION;
+        return currentClaimableReward + IPikaPerp(pikaPerp).getShare(account) * (_rewardPerTokenStored - previousRewardPerToken[account]) / PRECISION;
     }
 
     fallback() external payable {}
@@ -103,7 +107,6 @@ contract VaultFeeReward is ReentrancyGuard, Pausable {
 
     function _transferOut(address to, uint256 amount) internal {
         if (amount == 0 || to == address(0)) return;
-        amount = amount * (10**rewardTokenDecimal) / BASE;
         if (rewardToken == address(0)) {
             payable(to).sendValue(amount);
         } else {

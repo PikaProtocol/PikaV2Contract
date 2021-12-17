@@ -8,6 +8,7 @@ import "@openzeppelin/contracts/security/Pausable.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "../perp/IPikaPerp.sol";
 
+
 // PikaPerpV2 vault LPs can claim Pika token reward via this contract
 // adapted from https://github.com/Synthetixio/synthetix/edit/develop/contracts/StakingRewards.sol
 contract VaultTokenReward is ReentrancyGuard, Pausable, Ownable {
@@ -38,9 +39,9 @@ contract VaultTokenReward is ReentrancyGuard, Pausable, Ownable {
         address _rewardsToken,
         address _pikaPerp
     ) public {
+        rewardsDistribution = _rewardsDistribution;
         rewardsToken = IERC20(_rewardsToken);
         pikaPerp = _pikaPerp;
-        rewardsDistribution = _rewardsDistribution;
     }
 
     /* ========== VIEWS ========== */
@@ -74,7 +75,8 @@ contract VaultTokenReward is ReentrancyGuard, Pausable, Ownable {
 
     /* ========== MUTATIVE FUNCTIONS ========== */
 
-    function getReward() public nonReentrant updateReward(msg.sender) {
+    function getReward() public nonReentrant {
+        updateReward(msg.sender);
         uint256 reward = rewards[msg.sender];
         if (reward > 0) {
             rewards[msg.sender] = 0;
@@ -85,7 +87,8 @@ contract VaultTokenReward is ReentrancyGuard, Pausable, Ownable {
 
     /* ========== RESTRICTED FUNCTIONS ========== */
 
-    function notifyRewardAmount(uint256 reward) external onlyRewardsDistribution updateReward(address(0)) {
+    function notifyRewardAmount(uint256 reward) external onlyRewardsDistribution {
+        updateReward(address(0));
         if (block.timestamp >= periodFinish) {
             rewardRate = reward.div(rewardsDuration);
         } else {
@@ -126,17 +129,16 @@ contract VaultTokenReward is ReentrancyGuard, Pausable, Ownable {
         pikaPerp = _pikaPerp;
     }
 
-    /* ========== MODIFIERS ========== */
-
-    modifier updateReward(address account) {
+    function updateReward(address account) public {
         rewardPerTokenStored = rewardPerToken();
         lastUpdateTime = lastTimeRewardApplicable();
         if (account != address(0)) {
             rewards[account] = earned(account);
             userRewardPerTokenPaid[account] = rewardPerTokenStored;
         }
-        _;
     }
+
+    /* ========== MODIFIERS ========== */
 
     modifier onlyRewardsDistribution() {
         require(msg.sender == rewardsDistribution, "Caller is not RewardsDistribution contract");

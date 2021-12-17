@@ -27,7 +27,6 @@ contract PikaStaking is ReentrancyGuard, Pausable {
     mapping(address => uint256) private previousRewardPerToken;
 
     uint256 public constant PRECISION = 10**18;
-
     event ClaimedReward(
         address user,
         address rewardToken,
@@ -99,7 +98,6 @@ contract PikaStaking is ReentrancyGuard, Pausable {
         updateReward(msg.sender);
         uint256 rewardToSend = claimableReward[msg.sender];
         claimableReward[msg.sender] = 0;
-
         if (rewardToSend > 0) {
             _transferOut(msg.sender, rewardToSend);
             emit ClaimedReward(
@@ -110,15 +108,15 @@ contract PikaStaking is ReentrancyGuard, Pausable {
         }
     }
 
-    function getClaimableReward() external view returns(uint256) {
-        uint256 currentClaimableReward = claimableReward[msg.sender];
+    function getClaimableReward(address account) external view returns(uint256) {
+        uint256 currentClaimableReward = claimableReward[account];
         if (_totalSupply == 0) return currentClaimableReward;
 
         uint256 _pendingReward = IPikaPerp(pikaPerp).getPendingPikaReward();
         uint256 _rewardPerTokenStored = cumulativeRewardPerTokenStored + _pendingReward * PRECISION / _totalSupply;
         if (_rewardPerTokenStored == 0) return currentClaimableReward;
 
-        return currentClaimableReward + _balances[msg.sender] * (_rewardPerTokenStored - previousRewardPerToken[msg.sender]) / PRECISION;
+        return currentClaimableReward + _balances[account] * (_rewardPerTokenStored - previousRewardPerToken[account]) / PRECISION;
     }
 
     fallback() external payable {}
@@ -128,7 +126,6 @@ contract PikaStaking is ReentrancyGuard, Pausable {
 
     function _transferOut(address to, uint256 amount) internal {
         if (amount == 0 || to == address(0)) return;
-        amount = amount * (10**rewardTokenDecimal) / PRECISION;
         if (rewardToken == address(0)) {
             payable(to).sendValue(amount);
         } else {
