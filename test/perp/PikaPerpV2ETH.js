@@ -109,11 +109,7 @@ describe("Trading", () => {
 			0,
 			0,
 			0,
-			0,
-			0,
-			60,
-			30,
-			4000
+			3600
 		]
 
 		await trading.updateVault(v);
