@@ -27,8 +27,6 @@ contract PikaPerpV2 is ReentrancyGuard {
         uint64 staked; // Total staked by users. 8 bytes
         uint64 shares; // Total ownership shares. 8 bytes
         // 32 bytes
-        uint80 lastCheckpointBalance; // Used for max drawdown. 10 bytes
-        uint80 lastCheckpointTime; // Used for max drawdown. 10 bytes
         uint32 stakingPeriod; // Time required to lock stake (seconds). 4 bytes
     }
 
@@ -196,8 +194,6 @@ contract PikaPerpV2 is ReentrancyGuard {
             balance: 0,
             staked: 0,
             shares: 0,
-            lastCheckpointBalance: 0,
-            lastCheckpointTime: uint80(block.timestamp),
             stakingPeriod: uint32(7 * 24 * 3600)
         });
     }
