@@ -155,6 +155,18 @@ contract PikaPerpV2 is ReentrancyGuard {
         uint256 liquidatorReward,
         uint256 remainingReward
     );
+    event ProtocolRewardDistributed(
+        address to,
+        uint256 amount
+    );
+    event PikaRewardDistributed(
+        address to,
+        uint256 amount
+    );
+    event VaultRewardDistributed(
+        address to,
+        uint256 amount
+    );
     event VaultUpdated(
         Vault vault
     );
@@ -194,7 +206,7 @@ contract PikaPerpV2 is ReentrancyGuard {
             balance: 0,
             staked: 0,
             shares: 0,
-            stakingPeriod: uint32(7 * 24 * 3600)
+            stakingPeriod: uint32(24 * 3600)
         });
     }
 
@@ -620,6 +632,7 @@ contract PikaPerpV2 is ReentrancyGuard {
         if (pendingProtocolReward > 0) {
             pendingProtocolReward = 0;
             IERC20(token).uniTransfer(protocolRewardDistributor, _pendingProtocolReward.mul(tokenBase).div(BASE));
+            emit ProtocolRewardDistributed(protocolRewardDistributor, _pendingProtocolReward.mul(tokenBase).div(BASE));
         }
         return _pendingProtocolReward.mul(tokenBase).div(BASE);
     }
@@ -630,6 +643,7 @@ contract PikaPerpV2 is ReentrancyGuard {
         if (pendingPikaReward > 0) {
             pendingPikaReward = 0;
             IERC20(token).uniTransfer(pikaRewardDistributor, _pendingPikaReward.mul(tokenBase).div(BASE));
+            emit PikaRewardDistributed(pikaRewardDistributor, _pendingPikaReward.mul(tokenBase).div(BASE));
         }
         return _pendingPikaReward.mul(tokenBase).div(BASE);
     }
@@ -640,6 +654,7 @@ contract PikaPerpV2 is ReentrancyGuard {
         if (pendingVaultReward > 0) {
             pendingVaultReward = 0;
             IERC20(token).uniTransfer(vaultRewardDistributor, _pendingVaultReward.mul(tokenBase).div(BASE));
+            emit VaultRewardDistributed(vaultRewardDistributor, _pendingVaultReward.mul(tokenBase).div(BASE));
         }
         return _pendingVaultReward.mul(tokenBase).div(BASE);
     }

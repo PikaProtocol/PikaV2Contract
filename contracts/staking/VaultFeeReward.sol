@@ -37,8 +37,9 @@ contract VaultFeeReward is ReentrancyGuard, Pausable {
     event Staked(address indexed user, uint256 amount);
     event Withdrawn(address indexed user, uint256 amount);
 
-    constructor(address _rewardToken, uint256 _rewardTokenDecimal) {
+    constructor(address _pikaPerp, address _rewardToken, uint256 _rewardTokenDecimal) {
         owner = msg.sender;
+        pikaPerp = _pikaPerp;
         rewardToken = _rewardToken;
         rewardTokenDecimal = _rewardTokenDecimal;
     }
