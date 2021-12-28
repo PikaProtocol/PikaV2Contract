@@ -17,7 +17,6 @@ contract PikaStaking is ReentrancyGuard, Pausable {
     address public pikaPerp;
     address public rewardToken;
     address public stakingToken;
-    uint256 public rewardTokenDecimal;
 
     uint256 public cumulativeRewardPerTokenStored;
     uint256 private _totalSupply;
@@ -35,11 +34,10 @@ contract PikaStaking is ReentrancyGuard, Pausable {
     event Staked(address indexed user, uint256 amount);
     event Withdrawn(address indexed user, uint256 amount);
 
-    constructor(address _stakingToken, address _rewardToken, uint256 _rewardTokenDecimal) {
+    constructor(address _stakingToken, address _rewardToken) {
         owner = msg.sender;
         stakingToken = _stakingToken;
         rewardToken = _rewardToken;
-        rewardTokenDecimal = _rewardTokenDecimal;
     }
 
     // Views methods

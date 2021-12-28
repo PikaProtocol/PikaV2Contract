@@ -88,7 +88,7 @@ describe("Trading", () => {
         pika = await pikaContract.deploy(owner.address, owner.address);
         await pika.unlock();
         const pikaStakingContract = await ethers.getContractFactory("PikaStaking");
-        pikaStaking = await pikaStakingContract.deploy(pika.address, "0x0000000000000000000000000000000000000000", 18);
+        pikaStaking = await pikaStakingContract.deploy(pika.address, "0x0000000000000000000000000000000000000000");
         const vaultFeeRewardContract = await ethers.getContractFactory("VaultFeeReward");
         vaultFeeReward = await vaultFeeRewardContract.deploy(trading.address,"0x0000000000000000000000000000000000000000", 18);
         const mockRewardTokenContract = await ethers.getContractFactory("TestUSDC");
