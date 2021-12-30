@@ -367,9 +367,10 @@ describe("Trading", () => {
 			const amount = 10000000000;
 			await trading.connect(addrs[1]).stake(amount, {from: addrs[1].address, value:  (amount*1e10).toString(), gasPrice: gasPrice});
 
-			const stakes = await trading.getStakes([owner.address,addrs[1].address]);
-			expect(stakes[0].shares).to.equal(BigNumber.from(vault1.shares))
-			expect(stakes[1].shares).to.equal(BigNumber.from(amount).mul(vault1.shares).div(vault1.balance))
+			const stake0 = await trading.getStake(owner.address);
+			const stake1 = await trading.getStake(addrs[1].address);
+			expect(stake0.shares).to.equal(BigNumber.from(vault1.shares))
+			expect(stake1.shares).to.equal(BigNumber.from(amount).mul(vault1.shares).div(vault1.balance))
 			const vault2 = await trading.getVault();
 			// console.log(vault2.staked.toString())
 			// console.log(vault2.balance.toString())

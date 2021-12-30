@@ -19,7 +19,7 @@ contract VaultFeeReward is ReentrancyGuard, Pausable {
     address public pikaPerp;
     address public rewardToken;
     address public stakingToken;
-    uint256 public rewardTokenDecimal;
+    uint256 public rewardTokenBase;
 
     uint256 public cumulativeRewardPerTokenStored;
 
@@ -34,6 +34,11 @@ contract VaultFeeReward is ReentrancyGuard, Pausable {
         address rewardToken,
         uint256 amount
     );
+    event Reinvested(
+        address user,
+        address rewardToken,
+        uint256 amount
+    );
     event Staked(address indexed user, uint256 amount);
     event Withdrawn(address indexed user, uint256 amount);
 
@@ -41,7 +46,7 @@ contract VaultFeeReward is ReentrancyGuard, Pausable {
         owner = msg.sender;
         pikaPerp = _pikaPerp;
         rewardToken = _rewardToken;
-        rewardTokenDecimal = _rewardTokenDecimal;
+        rewardTokenBase = _rewardTokenDecimal;
     }
 
     // Governance methods
@@ -84,9 +89,19 @@ contract VaultFeeReward is ReentrancyGuard, Pausable {
         }
     }
 
-    function reinvest() external {
-        uint256 claimedReward = claimReward();
-        IPikaPerp(pikaPerp).stake(claimedReward * BASE / rewardTokenDecimal);
+    function reinvest() external returns (uint256 reinvestAmount){
+        updateReward(msg.sender);
+        reinvestAmount = claimableReward[msg.sender];
+        claimableReward[msg.sender] = 0;
+        if (reinvestAmount > 0) {
+            IERC20(rewardToken).approve(pikaPerp, reinvestAmount);
+            IPikaPerp(pikaPerp).stakeFor(reinvestAmount * BASE / rewardTokenBase, msg.sender);
+            emit ClaimedReward(
+                msg.sender,
+                rewardToken,
+                reinvestAmount
+            );
+        }
     }
 
     function getClaimableReward(address account) external view returns(uint256) {

@@ -94,7 +94,7 @@ describe("Trading", () => {
 		const pikaStakingContract = await ethers.getContractFactory("PikaStaking");
 		pikaStaking = await pikaStakingContract.deploy(pika.address, usdc.address);
 		const vaultFeeRewardContract = await ethers.getContractFactory("VaultFeeReward");
-		vaultFeeReward = await vaultFeeRewardContract.deploy(trading.address, usdc.address, 6);
+		vaultFeeReward = await vaultFeeRewardContract.deploy(trading.address, usdc.address, 1000000);
 		const mockRewardTokenContract = await ethers.getContractFactory("TestUSDC");
 		rewardToken = await mockRewardTokenContract.deploy();
 		await rewardToken.mint(owner.address, 100000000000);
@@ -379,11 +379,12 @@ describe("Trading", () => {
 			const amount = 1000000000000;
 			await trading.connect(addrs[1]).stake(amount);
 
-			const stakes = await trading.getStakes([owner.address,addrs[1].address]);
-			expect(stakes[0].shares).to.equal(BigNumber.from(vault1.shares))
-			expect(stakes[1].shares).to.equal(BigNumber.from(amount).mul(vault1.shares).div(vault1.balance))
+			const stake0 = await trading.getStake(owner.address);
+			const stake1 = await trading.getStake(addrs[1].address);
+			expect(stake0.shares).to.equal(BigNumber.from(vault1.shares))
+			expect(stake1.shares).to.equal(BigNumber.from(amount).mul(vault1.shares).div(vault1.balance))
 
-			const vault2 = await trading.getVault();
+			// const vault2 = await trading.getVault();
 			// console.log(vault2.staked.toString())
 			// console.log(vault2.balance.toString())
 			// console.log(vault2.shares.toString())
@@ -453,6 +454,7 @@ describe("Trading", () => {
 			expect((await vaultFeeReward.getClaimableReward(addrs[1].address)).sub(startAddress1ClaimableReward)).to.be.equal("2500000");
 			const usdcBeforeClaim = await usdc.balanceOf(owner.address);
 			const currentClaimableReward = await vaultFeeReward.getClaimableReward(owner.address);
+			// await vaultFeeReward.connect(owner).reinvest();
 			await vaultFeeReward.connect(owner).claimReward();
 			expect((await usdc.balanceOf(owner.address)).sub(usdcBeforeClaim)).to.be.equal(currentClaimableReward);
 
@@ -478,7 +480,7 @@ describe("Trading", () => {
 			await usdc.mint(account2.address, 1000000000000);
 
 			// stakingAccount1 stake
-			await usdc.connect(account1).approve(trading.address, "10000000000000000000000")
+			await usdc.connect(account1).approve(trading.address, "500000000000")
 			await trading.connect(account1).stake("500000000000")
 			expect(await vaultTokenReward.balanceOf(account1.address)).to.be.equal("5000000000000000000000")
 

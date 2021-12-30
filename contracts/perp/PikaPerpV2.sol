@@ -211,14 +211,12 @@ contract PikaPerpV2 is ReentrancyGuard {
 
     // Methods
 
-    // Stakes amount of usdc in the vault
-    function stake(uint256 amount) external payable nonReentrant {
+    // Stakes amount of usdc in the vault for user
+    function stakeFor(uint256 amount, address user) public payable nonReentrant {
         require(canUserStake || msg.sender == owner, "!stake");
-        address user = msg.sender;
         IVaultReward(vaultRewardDistributor).updateReward(user);
         IVaultReward(vaultTokenReward).updateReward(user);
         IERC20(token).uniTransferFromSenderToThis(amount.mul(tokenBase).div(BASE));
-        require(amount >= minMargin, "!margin");
         require(uint256(vault.staked) + amount <= uint256(vault.cap), "!cap");
         uint256 shares = vault.staked > 0 ? amount.mul(uint256(vault.shares)).div(uint256(vault.balance)) : amount;
         vault.balance += uint96(amount);
@@ -244,6 +242,10 @@ contract PikaPerpV2 is ReentrancyGuard {
             shares
         );
 
+    }
+
+    function stake(uint256 amount) external payable {
+        stakeFor(amount, msg.sender);
     }
 
     // Redeems amount from Stake with id = stakeId
@@ -712,12 +714,15 @@ contract PikaPerpV2 is ReentrancyGuard {
         return uint256(stakes[stakeOwner].shares);
     }
 
-    function getStakes(address[] calldata stakeOwners) external view returns(Stake[] memory _stakes) {
-        uint256 length = stakeOwners.length;
-        _stakes = new Stake[](length);
-        for (uint256 i = 0; i < length; i++) {
-            _stakes[i] = stakes[stakeOwners[i]];
+    function getShareBalance(address stakeOwner) external view returns(uint256) {
+        if (vault.shares == 0) {
+            return 0;
         }
+        return (uint256(stakes[stakeOwner].shares)).mul(uint256(vault.balance)).div(uint256(vault.shares));
+    }
+
+    function getStake(address stakeOwner) external view returns(Stake memory) {
+        return stakes[stakeOwner];
     }
 
     function canLiquidate(
