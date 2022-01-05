@@ -42,11 +42,11 @@ contract VaultFeeReward is ReentrancyGuard, Pausable {
     event Staked(address indexed user, uint256 amount);
     event Withdrawn(address indexed user, uint256 amount);
 
-    constructor(address _pikaPerp, address _rewardToken, uint256 _rewardTokenDecimal) {
+    constructor(address _pikaPerp, address _rewardToken, uint256 _rewardTokenBase) {
         owner = msg.sender;
         pikaPerp = _pikaPerp;
         rewardToken = _rewardToken;
-        rewardTokenBase = _rewardTokenDecimal;
+        rewardTokenBase = _rewardTokenBase;
     }
 
     // Governance methods
@@ -94,9 +94,10 @@ contract VaultFeeReward is ReentrancyGuard, Pausable {
         reinvestAmount = claimableReward[msg.sender];
         claimableReward[msg.sender] = 0;
         if (reinvestAmount > 0) {
-            IERC20(rewardToken).approve(pikaPerp, reinvestAmount);
+            IERC20(rewardToken).safeApprove(pikaPerp, 0);
+            IERC20(rewardToken).safeApprove(pikaPerp, reinvestAmount);
             IPikaPerp(pikaPerp).stakeFor(reinvestAmount * BASE / rewardTokenBase, msg.sender);
-            emit ClaimedReward(
+            emit Reinvested(
                 msg.sender,
                 rewardToken,
                 reinvestAmount
