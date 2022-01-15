@@ -177,10 +177,8 @@ contract PikaPerpV2 is ReentrancyGuard {
         uint256 productId,
         Product product
     );
-    event ProtocolRewardRatioUpdated(
-        uint256 protocolRewardRatio
-    );
-    event PikaRewardRatioUpdated(
+    event RewardRatioUpdated(
+        uint256 protocolRewardRatio,
         uint256 pikaRewardRatio
     );
     event OracleUpdated(
@@ -212,7 +210,7 @@ contract PikaPerpV2 is ReentrancyGuard {
     // Methods
 
     // Stakes amount of usdc in the vault for user
-    function stakeFor(uint256 amount, address user) public payable nonReentrant {
+    function stakeForUser(uint256 amount, address user) public payable nonReentrant {
         require(canUserStake || msg.sender == owner, "!stake");
         IVaultReward(vaultRewardDistributor).updateReward(user);
         IVaultReward(vaultTokenReward).updateReward(user);
@@ -245,7 +243,7 @@ contract PikaPerpV2 is ReentrancyGuard {
     }
 
     function stake(uint256 amount) external payable {
-        stakeFor(amount, msg.sender);
+        stakeForUser(amount, msg.sender);
     }
 
     // Redeems amount from Stake with id = stakeId
@@ -295,13 +293,22 @@ contract PikaPerpV2 is ReentrancyGuard {
         );
     }
 
-    // Opens position with margin = msg.value
     function openPosition(
         uint256 productId,
         uint256 margin,
         bool isLong,
         uint256 leverage
-    ) external payable nonReentrant returns(uint256 positionId) {
+    ) external payable returns(uint256) {
+        return openPositionForUser(msg.sender, productId, margin, isLong, leverage);
+    }
+
+    function openPositionForUser(
+        address user,
+        uint256 productId,
+        uint256 margin,
+        bool isLong,
+        uint256 leverage
+    ) public payable nonReentrant returns(uint256 positionId) {
         // Check params
         require(margin >= minMargin, "!margin");
         require(leverage >= 1 * BASE, "!leverage");
@@ -318,7 +325,6 @@ contract PikaPerpV2 is ReentrancyGuard {
         pendingPikaReward = pendingPikaReward.add(tradeFee.mul(pikaRewardRatio).div(10**4));
         pendingVaultReward = pendingVaultReward.add(tradeFee.mul(10**4 - protocolRewardRatio - pikaRewardRatio).div(10**4));
 
-        // Check exposure
         uint256 amount = margin.mul(leverage).div(BASE);
         uint256 price = _calculatePrice(product.feed, isLong, product.openInterestLong,
             product.openInterestShort, uint256(vault.balance).mul(uint256(product.weight)).mul(exposureMultiplier).div(uint256(totalWeight)).div(10**4),
@@ -326,7 +332,7 @@ contract PikaPerpV2 is ReentrancyGuard {
 
         _updateOpenInterest(productId, amount, isLong, true);
 
-        positionId = getPositionId(msg.sender, productId, isLong);
+        positionId = getPositionId(user, productId, isLong);
         Position storage position = positions[positionId];
         if (position.margin > 0) {
             price = (uint256(position.margin).mul(position.leverage).mul(uint256(position.price)).add(margin.mul(leverage).mul(price))).div(
@@ -337,7 +343,7 @@ contract PikaPerpV2 is ReentrancyGuard {
         require(margin < maxPositionMargin, "!max margin");
 
         positions[positionId] = Position({
-        owner: msg.sender,
+        owner: user,
         productId: uint64(productId),
         margin: uint64(margin),
         leverage: uint64(leverage),
@@ -348,7 +354,7 @@ contract PikaPerpV2 is ReentrancyGuard {
         });
         emit NewPosition(
             positionId,
-            msg.sender,
+            user,
             productId,
             isLong,
             price,
@@ -937,16 +943,11 @@ contract PikaPerpV2 is ReentrancyGuard {
         vaultTokenReward = _vaultTokenReward;
     }
 
-    function setProtocolRewardRatio(uint256 _protocolRewardRatio) external onlyOwner {
-        require(_protocolRewardRatio + pikaRewardRatio <= 10000, "!too-much");
+    function setRewardRatio(uint256 _protocolRewardRatio, uint256 _pikaRewardRatio) external onlyOwner {
+        require(_protocolRewardRatio + _pikaRewardRatio <= 10000, "!too-much");
         protocolRewardRatio = _protocolRewardRatio;
-        emit ProtocolRewardRatioUpdated(protocolRewardRatio);
-    }
-
-    function setPikaRewardRatio(uint256 _pikaRewardRatio) external onlyOwner {
-        require(protocolRewardRatio + _pikaRewardRatio <= 10000, "!too-much");
         pikaRewardRatio = _pikaRewardRatio;
-        emit PikaRewardRatioUpdated(pikaRewardRatio);
+        emit RewardRatioUpdated(protocolRewardRatio, pikaRewardRatio);
     }
 
     function setMinMargin(uint256 _minMargin) external onlyOwner {

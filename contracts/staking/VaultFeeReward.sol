@@ -96,7 +96,7 @@ contract VaultFeeReward is ReentrancyGuard, Pausable {
         if (reinvestAmount > 0) {
             IERC20(rewardToken).safeApprove(pikaPerp, 0);
             IERC20(rewardToken).safeApprove(pikaPerp, reinvestAmount);
-            IPikaPerp(pikaPerp).stakeFor(reinvestAmount * BASE / rewardTokenBase, msg.sender);
+            IPikaPerp(pikaPerp).stakeForUser(reinvestAmount * BASE / rewardTokenBase, msg.sender);
             emit Reinvested(
                 msg.sender,
                 rewardToken,
