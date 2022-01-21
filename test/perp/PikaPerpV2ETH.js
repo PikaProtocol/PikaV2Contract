@@ -131,7 +131,7 @@ describe("Trading", () => {
 		// add products
 		await trading.addProduct(1, p);
 		// set maxMargin
-		await trading.setMaxPositionMargin(10000000000000);
+		await trading.setMargin(1000000, 10000000000000);
 
 
 	});
@@ -349,7 +349,7 @@ describe("Trading", () => {
 			latestPrice = 2760e8;
 			// const price3 = _calculatePriceWithFee(oracle.address, 10, false, margin*leverage/1e8, 0, 100000000e8, 50000000e8, margin*leverage/1e8);
 			await oracle.setPrice(2760e8);
-			await trading.connect(owner).setAllowPublicLiquidator(true);
+			await trading.connect(owner).setCanUserStakeAndAllowPublicLiquidator(true, true);
 			const tx3 = await trading.connect(addrs[userId]).liquidatePositions([positionId]);
 			const totalFee = getInterestFee(3*margin, leverage, 0, 500);
 			expect(await tx3).to.emit(trading, "ClosePosition").withArgs(positionId, user, productId, latestPrice, position1.price, margin.toString(), leverage.toString(), totalFee, margin.toString(), true);
@@ -363,7 +363,6 @@ describe("Trading", () => {
 			// console.log(vault1.staked.toString())
 			// console.log("Vault1 balance", vault1.balance.toString())
 			// console.log(vault1.shares.toString())
-			await trading.connect(owner).setCanUserStake(true);
 			const amount = 10000000000;
 			await trading.connect(addrs[1]).stake(amount, {from: addrs[1].address, value:  (amount*1e10).toString(), gasPrice: gasPrice});
 

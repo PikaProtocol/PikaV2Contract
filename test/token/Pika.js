@@ -22,15 +22,15 @@ describe("Pika", function () {
 
   describe("test constructor", async function(){
     it("initial state", async function () {
-      expect(await this.pika.totalSupply()).to.be.equal("100000000000000000000000000") // 100m supply
-      expect(await this.pika.balanceOf(this.owner.address)).to.be.equal("100000000000000000000000000")
+      expect(await this.pika.totalSupply()).to.be.equal("1000000000000000000000000000") // 1b supply
+      expect(await this.pika.balanceOf(this.owner.address)).to.be.equal("1000000000000000000000000000")
     })
   })
 
   describe("test mint", async function(){
     it("mint", async function () {
       await this.pika.connect(this.owner).mint(this.alice.address, "10000000000000000000000")
-      expect(await this.pika.totalSupply()).to.be.equal("100010000000000000000000000")
+      expect(await this.pika.totalSupply()).to.be.equal("1000010000000000000000000000")
       expect(await this.pika.balanceOf(this.alice.address)).to.be.equal("10000000000000000000000")
     })
   })
@@ -41,7 +41,7 @@ describe("Pika", function () {
       await expect(this.pika.connect(this.owner).mint(this.bob.address, "10000000000000000000000")).to.be.revertedWith("mint: only the minter can mint")
       // expect(await this.pika.expect)
       await this.pika.connect(this.alice).mint(this.bob.address, "10000000000000000000000")
-      expect(await this.pika.totalSupply()).to.be.equal("100010000000000000000000000")
+      expect(await this.pika.totalSupply()).to.be.equal("1000010000000000000000000000")
       expect(await this.pika.balanceOf(this.bob.address)).to.be.equal("10000000000000000000000")
     })
   })

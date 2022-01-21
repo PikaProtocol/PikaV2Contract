@@ -17,7 +17,7 @@ contract Pika {
     uint8 public constant decimals = 18;
 
     /// @notice Total number of tokens in circulation
-    uint public totalSupply = 100000000e18; // 100 million PIKA
+    uint public totalSupply = 1000000000e18; // 1 billion PIKA
 
     /// @notice Address which may mint new tokens
     address public minter;
