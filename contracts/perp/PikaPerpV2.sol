@@ -955,9 +955,10 @@ contract PikaPerpV2 is ReentrancyGuard {
         maxPositionMargin = _maxPositionMargin;
     }
 
-    function setMaxShift(uint256 _maxShift) external onlyOwner {
-        require(_maxShift >= 0 && _maxShift <= 0.01e8);
+    function setMaxShiftAndMinProfitTime(uint256 _maxShift, uint256 _minProfitTime) external onlyOwner {
+        require(_maxShift >= 0 && _maxShift <= 0.01e8 && _minProfitTime >= 0 && _minProfitTime <= 24 hours);
         maxShift = _maxShift;
+        minProfitTime = _minProfitTime;
     }
 
     function setCanUserStakeAndAllowPublicLiquidator(bool _canUserStake, bool _allowPublicLiquidator) external onlyOwner {
