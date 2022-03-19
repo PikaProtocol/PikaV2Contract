@@ -92,8 +92,8 @@ describe("Trading", () => {
 		await pika.unlock();
 
 		const feeCalculatorContract = await ethers.getContractFactory("FeeCalculator");
-		feeCalculator = await feeCalculatorContract.deploy(pika.address, 40, 9000, oracle.address);
-		await feeCalculator.setFeeTier([1000, 10000, 100000, 500000, 1000000, 2500000, 5000000], [0, 500, 1500, 2500, 3500, 4000, 4500, 0])
+		feeCalculator = await feeCalculatorContract.deploy(40, 9000, oracle.address);
+		// await feeCalculator.setFeeTier([1000, 10000, 100000, 500000, 1000000, 2500000, 5000000], [0, 500, 1500, 2500, 3500, 4000, 4500, 0])
 
 		const tradingContract = await ethers.getContractFactory("PikaPerpV2");
 		trading = await tradingContract.deploy(usdc.address, 1000000, oracle.address, feeCalculator.address);

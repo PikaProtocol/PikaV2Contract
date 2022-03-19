@@ -71,7 +71,7 @@ function assertAlmostEqual(actual, expected, accuracy = 10000000) {
 
 describe("Trading", () => {
 
-	let trading, addrs = [], owner, oracle, usdc, pika, pikaStaking, vaultFeeReward, vaultTokenReward, rewardToken, orderbook;
+	let trading, addrs = [], owner, oracle, usdc, pika, pikaStaking, vaultFeeReward, vaultTokenReward, rewardToken, orderbook, feeCalculator;
 
 	before(async () => {
 
@@ -81,8 +81,11 @@ describe("Trading", () => {
 		const oracleContract = await ethers.getContractFactory("MockOracle");
 		oracle = await oracleContract.deploy();
 
+		const feeCalculatorContract = await ethers.getContractFactory("FeeCalculator");
+		feeCalculator = await feeCalculatorContract.deploy(40, 9000, oracle.address);
+
 		const tradingContract = await ethers.getContractFactory("PikaPerpV2");
-		trading = await tradingContract.deploy("0x0000000000000000000000000000000000000000", "1000000000000000000", oracle.address, 1000000);
+		trading = await tradingContract.deploy("0x0000000000000000000000000000000000000000", "1000000000000000000", oracle.address, feeCalculator.address);
 
         const pikaContract = await ethers.getContractFactory("Pika");
         pika = await pikaContract.deploy(owner.address, owner.address);
@@ -353,7 +356,7 @@ describe("Trading", () => {
 			latestPrice = 2760e8;
 			// const price3 = _calculatePriceWithFee(oracle.address, 10, false, margin*leverage/1e8, 0, 100000000e8, 50000000e8, margin*leverage/1e8);
 			await oracle.setPrice(2760e8);
-			await trading.connect(owner).setCanUserStakeAndAllowPublicLiquidator(true, true);
+			await trading.setParameters("300000", "43200", true, true, "10000", "10000");
 			const tx3 = await trading.connect(addrs[userId]).liquidatePositions([positionId]);
 			const totalFee = getInterestFee(3*margin, leverage, 0, 500);
 			expect(await tx3).to.emit(trading, "ClosePosition").withArgs(positionId, user, productId, latestPrice, position1.price, margin.toString(), leverage.toString(), totalFee, (-1*margin).toString(), true);
@@ -378,6 +381,7 @@ describe("Trading", () => {
 			// console.log(vault2.staked.toString())
 			// console.log(vault2.balance.toString())
 			// console.log(vault2.shares.toString())
+			await provider.send("evm_increaseTime", [3600])
 			const userBalanceStart = await provider.getBalance(owner.address);
 			await trading.connect(owner).redeem(owner.address, 5000000000, owner.address); // redeem half
 			// const userBalanceNow = await provider.getBalance(owner.address);

@@ -10,28 +10,29 @@ import "../oracle/IOracle.sol";
 contract FeeCalculator is Ownable {
 
     uint256 public constant PRICE_BASE = 10000;
-    address public protocolToken;
     uint256 public threshold;
     uint256 public weightDecay;
     uint256 public baseFee = 10;
     uint256 public n = 1;
+    uint256 public maxDynamicFee = 50; // 0.5%
     address public oracle;
-    // [1000, 10000, 100000, 500000, 1000000, 2500000, 5000000]
-    uint256[] public tokenTiers;
-    // [0%,   5%,     15%,   25%,    35%,     40%,     45%,     50%    ]
-    uint256[] public discounts;
 
-    constructor(address _protocolToken, uint256 _threshold, uint256 _weightDecay, address _oracle) public {
-        protocolToken = _protocolToken;
+
+    constructor(uint256 _threshold, uint256 _weightDecay, address _oracle) public {
         threshold = _threshold;
         weightDecay = _weightDecay;
         oracle = _oracle;
     }
 
     function getFee(address token, address account) external view returns (int256) {
-        return getDynamicFee(token) - getFeeDiscount(account) * int256(baseFee) / int256(PRICE_BASE);
+        return getDynamicFee(token);
     }
 
+    /**
+     * @notice The dynamic fee to add to base fee. It is updated based on the volatility of recent price updates
+     * Larger volatility leads to the higher the dynamic fee. It is used to mitigate oracle front-running.
+     *
+     */
     function getDynamicFee(address token) public view returns (int256) {
         uint256[] memory prices = IOracle(oracle).getLastNPrices(token, n);
         uint dynamicFee = 0;
@@ -41,6 +42,7 @@ contract FeeCalculator is Ownable {
             uint deviation = _calDeviation(prices[i - 1], prices[i], threshold);
             dynamicFee += deviation;
         }
+        dynamicFee = dynamicFee > maxDynamicFee ? maxDynamicFee : dynamicFee;
         return int256(dynamicFee);
     }
 
@@ -57,25 +59,6 @@ contract FeeCalculator is Ownable {
         return deviationRatio > threshold ? deviationRatio - threshold : 0;
     }
 
-    function getFeeDiscount(address account) public view returns(int256) {
-        uint256 tokenBalance = IERC20(protocolToken).balanceOf(account);
-        if (tokenBalance == 0) {
-            return 0;
-        }
-        for (uint i = 0; i < tokenTiers.length; i++) {
-            if (tokenBalance < tokenTiers[i]) {
-                return int256(discounts[i]);
-            }
-        }
-        return int256(discounts[discounts.length - 1]);
-    }
-
-    function setFeeTier(uint256[] memory _tokenTiers, uint256[] memory _discounts) external onlyOwner {
-        require(_tokenTiers.length + 1 == _discounts.length, "!length");
-        tokenTiers = _tokenTiers;
-        discounts = _discounts;
-    }
-
     function setThreshold(uint256 _threshold) external onlyOwner {
         threshold = _threshold;
     }
@@ -84,11 +67,12 @@ contract FeeCalculator is Ownable {
         weightDecay = _weightDecay;
     }
 
-    function setBaseFee(uint256 _baseFee) external onlyOwner {
-        baseFee = _baseFee;
-    }
-
     function setN(uint256 _n) external onlyOwner {
         n = _n;
     }
+
+    function setMaxDynamicFee(uint256 _maxDynamicFee) external onlyOwner {
+        maxDynamicFee = _maxDynamicFee;
+    }
+
 }
