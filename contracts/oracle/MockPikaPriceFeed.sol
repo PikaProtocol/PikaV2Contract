@@ -6,7 +6,7 @@ import "@openzeppelin/contracts/utils/math/SafeMath.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@chainlink/contracts/src/v0.8/interfaces/AggregatorV2V3Interface.sol";
 
-contract MockPikaPriceFeed is IOracle, Ownable {
+contract MockPikaPriceFeed is Ownable {
     using SafeMath for uint256;
 
     uint256 public lastUpdatedTime;
@@ -32,7 +32,7 @@ contract MockPikaPriceFeed is IOracle, Ownable {
         priceDuration = 300; // 5mins
     }
 
-    function getPrice(address feed) external view override returns (uint256) {
+    function getPrice(address feed) external view returns (uint256) {
         (uint256 chainlinkPrice, uint256 chainlinkTimestamp) = getChainlinkPrice(feed);
         console.log(chainlinkTimestamp, lastUpdatedTime);
         console.log("price duration", priceDuration);

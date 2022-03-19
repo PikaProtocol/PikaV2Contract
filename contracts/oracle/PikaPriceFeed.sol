@@ -1,21 +1,23 @@
 pragma solidity ^0.8.0;
 
-import "./IOracle.sol";
 import "@openzeppelin/contracts/utils/math/SafeMath.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@chainlink/contracts/src/v0.8/interfaces/AggregatorV2V3Interface.sol";
 
-contract PikaPriceFeed is IOracle, Ownable {
+contract PikaPriceFeed is Ownable {
     using SafeMath for uint256;
 
     uint256 public lastUpdatedTime;
     uint256 public lastChainlinkUpdatedTime;
     uint256 public priceDuration;
     mapping (address => uint256) public priceMap;
-    mapping (address => address) public feedTokenMap;
+    mapping (address => address) public tokenFeedMap;
     address public keeper;
     bool public isChainlinkOnly = false;
     uint256 public maxPriceDiff = 2e16; // 2%
+    uint256 public delta = 20; // 20bp
+    uint256 public decay = 9000; // 0.9
+    uint256 public dynamicFee = 0;
 
     event PriceSet(address token, uint256 price, uint256 timestamp);
     event PriceDurationSet(uint256 priceDuration);
@@ -31,12 +33,12 @@ contract PikaPriceFeed is IOracle, Ownable {
         priceDuration = 300; // 5mins
     }
 
-    function getPrice(address feed) public view override returns (uint256) {
-        (uint256 chainlinkPrice, uint256 chainlinkTimestamp) = getChainlinkPrice(feed);
+    function getPrice(address token) public view returns (uint256) {
+        (uint256 chainlinkPrice, uint256 chainlinkTimestamp) = getChainlinkPrice(token);
         if (isChainlinkOnly || (block.timestamp > lastUpdatedTime.add(priceDuration) && chainlinkTimestamp > lastUpdatedTime)) {
             return chainlinkPrice;
         }
-        uint256 pikaPrice = priceMap[feedTokenMap[feed]];
+        uint256 pikaPrice = priceMap[token];
         uint256 priceDiff = pikaPrice > chainlinkPrice ? (pikaPrice.sub(chainlinkPrice)).mul(1e18).div(chainlinkPrice) :
             (chainlinkPrice.sub(pikaPrice)).mul(1e18).div(chainlinkPrice);
         if (priceDiff > maxPriceDiff) {
@@ -45,10 +47,11 @@ contract PikaPriceFeed is IOracle, Ownable {
         return pikaPrice;
     }
 
-    function getChainlinkPrice(address feed) public view returns (uint256 priceToReturn, uint256 chainlinkTimestamp) {
+    function getChainlinkPrice(address token) public view returns (uint256 priceToReturn, uint256 chainlinkTimestamp) {
+        address feed = tokenFeedMap[token];
         require(feed != address(0), '!feed-error');
 
-        (,int price,,uint timeStamp,) = AggregatorV3Interface(feed).latestRoundData();
+        (,int256 price,,uint256 timeStamp,) = AggregatorV3Interface(feed).latestRoundData();
 
         require(price > 0, '!price');
         require(timeStamp > 0, '!timeStamp');
@@ -69,6 +72,28 @@ contract PikaPriceFeed is IOracle, Ownable {
         return curPrices;
     }
 
+    function getLastNPrices(address token, uint256 n) external view returns(uint256[] memory) {
+        address feed = tokenFeedMap[token];
+        require(feed != address(0), '!feed-error');
+
+        uint256[] memory prices = new uint256[](n);
+        uint8 decimals = AggregatorV3Interface(feed).decimals();
+        (uint80 roundId,,,,) = AggregatorV3Interface(feed).latestRoundData();
+
+        for (uint256 i = 0; i < n; i++) {
+            (,int256 price,,,) = AggregatorV3Interface(feed).getRoundData(roundId - uint80(i));
+            require(price > 0, '!price');
+            uint256 priceToReturn;
+            if (decimals != 8) {
+                priceToReturn = uint256(price) * (10**8) / (10**uint256(decimals));
+            } else {
+                priceToReturn = uint256(price);
+            }
+            prices[i] = priceToReturn;
+        }
+        return prices;
+    }
+
     function setPrices(address[] memory tokens, uint256[] memory prices) external onlyKeeper {
         for (uint256 i = 0; i < tokens.length; i++) {
             address token = tokens[i];
@@ -84,9 +109,10 @@ contract PikaPriceFeed is IOracle, Ownable {
         emit PriceDurationSet(priceDuration);
     }
 
-    function setTokenForFeed(address[] memory feeds, address[] memory tokens) external onlyOwner {
+    function setFeedForToken(address[] memory feeds, address[] memory tokens) external onlyOwner {
+        require(feeds.length == tokens.length, "!length");
         for (uint256 i = 0; i < tokens.length; i++) {
-            feedTokenMap[feeds[i]] = tokens[i];
+            tokenFeedMap[tokens[i]] = feeds[i];
         }
     }
 
@@ -103,6 +129,11 @@ contract PikaPriceFeed is IOracle, Ownable {
     function setIsChainlinkOnly(bool _isChainlinkOnly) external onlyOwner {
         isChainlinkOnly = _isChainlinkOnly;
         emit IsChainlinkOnlySet(isChainlinkOnly);
+    }
+
+    function setDeltaAndDecay(uint256 _delta, uint256 _decay) external onlyOwner {
+        delta = _delta;
+        decay = _decay;
     }
 
     modifier onlyKeeper() {

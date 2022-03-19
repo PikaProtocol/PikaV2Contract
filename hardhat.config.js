@@ -3,7 +3,7 @@ require('@openzeppelin/hardhat-upgrades');
 require("@nomiclabs/hardhat-web3");
 require("@nomiclabs/hardhat-etherscan");
 // require("hardhat-gas-reporter");
-const { infuraApiKey, mnemonic, etherscanApiKey, opkovankey, opkey } = require('./secrets.json');
+const { infuraApiKey, rinkebykey, etherscanApiKey, opkovankey, opkey } = require('./secrets.json');
 
 // You need to export an object to set up your config
 // Go to https://hardhat.org/config/ to learn more
@@ -22,11 +22,11 @@ module.exports = {
         },
         kovan: {
             url: `https://kovan.infura.io/v3/${infuraApiKey}`,
-            accounts: [`0x${opkovankey}`]
+            accounts: [`0x${rinkebykey}`]
         },
         rinkeby: {
             url: `https://rinkeby.infura.io/v3/${infuraApiKey}`,
-            accounts: [`0x${opkovankey}`]
+            accounts: [`0x${rinkebykey}`]
         },
         optimisticKovan: {
             url: 'https://kovan.optimism.io',

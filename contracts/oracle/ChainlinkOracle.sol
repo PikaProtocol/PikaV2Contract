@@ -1,11 +1,10 @@
 pragma solidity ^0.8.0;
 
-import "./IOracle.sol";
 import "@chainlink/contracts/src/v0.8/interfaces/AggregatorV2V3Interface.sol";
 
-contract ChainlinkOracle is IOracle {
+contract ChainlinkOracle {
 
-    function getPrice(address feed) external view override returns (uint256)  {
+    function getPrice(address feed) external view returns (uint256)  {
         require(feed != address(0), '!feed-error');
 
         (,int price,,uint timeStamp,) = AggregatorV3Interface(feed).latestRoundData();
