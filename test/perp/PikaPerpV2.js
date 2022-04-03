@@ -88,8 +88,8 @@ describe("Trading", () => {
 		oracle = await oracleContract.deploy();
 
 		const pikaContract = await ethers.getContractFactory("Pika");
-		pika = await pikaContract.deploy(owner.address, owner.address);
-		await pika.unlock();
+		pika = await pikaContract.deploy("Pika", "PIKA", "1000000000000000000000000000", owner.address, owner.address)
+		await pika.setTransfersAllowed(true);
 
 		const feeCalculatorContract = await ethers.getContractFactory("FeeCalculator");
 		feeCalculator = await feeCalculatorContract.deploy(40, 9000, oracle.address);
@@ -98,7 +98,7 @@ describe("Trading", () => {
 		const tradingContract = await ethers.getContractFactory("PikaPerpV2");
 		trading = await tradingContract.deploy(usdc.address, 1000000, oracle.address, feeCalculator.address);
 
-		const pikaStakingContract = await ethers.getContractFactory("PikaStaking");
+		const vePIKAFeeRewardContract = await ethers.getContractFactory("PikaStaking");
 		pikaStaking = await pikaStakingContract.deploy(pika.address, usdc.address);
 		const vaultFeeRewardContract = await ethers.getContractFactory("VaultFeeReward");
 		vaultFeeReward = await vaultFeeRewardContract.deploy(trading.address, usdc.address, 1000000);

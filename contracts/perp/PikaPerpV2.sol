@@ -583,7 +583,7 @@ contract PikaPerpV2 is ReentrancyGuard {
         }
     }
 
-    function _validateManager(address account) private returns(bool) {
+    function _validateManager(address account) private view returns(bool) {
         require(managers[msg.sender], "!manager");
         require(approvedManagers[account][msg.sender], "!approvedManager");
         return true;

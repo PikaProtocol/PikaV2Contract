@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: BUSL-1.1
+// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
 import "@openzeppelin/contracts/utils/math/SignedSafeMath.sol";
@@ -47,15 +47,15 @@ contract FeeCalculator is Ownable {
     }
 
     function _calDeviation(
-        uint price,
-        uint previousPrice,
-        uint threshold
-    ) internal pure returns (uint) {
+        uint256 price,
+        uint256 previousPrice,
+        uint256 threshold
+    ) internal pure returns (uint256) {
         if (previousPrice == 0) {
             return 0;
         }
-        uint absDelta = price > previousPrice ? price - previousPrice : previousPrice - price;
-        uint deviationRatio = absDelta * PRICE_BASE / previousPrice;
+        uint256 absDelta = price > previousPrice ? price - previousPrice : previousPrice - price;
+        uint256 deviationRatio = absDelta * PRICE_BASE / previousPrice;
         return deviationRatio > threshold ? deviationRatio - threshold : 0;
     }
 

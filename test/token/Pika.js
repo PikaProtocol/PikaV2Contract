@@ -16,7 +16,7 @@ describe("Pika", function () {
   })
 
   beforeEach(async function () {
-    this.pika = await this.pikaContract.deploy(this.owner.address, this.owner.address)
+    this.pika = await this.pikaContract.deploy("Pika", "PIKA", 1000000000000000000000000000, this.owner.address, this.owner.address)
   })
 
 
