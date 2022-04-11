@@ -5,6 +5,7 @@ const { waffle } = require("hardhat");
 const { parseUnits, formatUnits } = require('./utils.js');
 const { utils, BigNumber } = require("ethers")
 require("@nomiclabs/hardhat-web3");
+const hre = require("hardhat");
 const provider = waffle.provider
 
 const maxShift = 0.003e8; // max shift (shift is used adjust the price to balance the longs and shorts)
@@ -73,7 +74,7 @@ function assertAlmostEqual(actual, expected, accuracy = 10000000) {
 
 describe("Trading", () => {
 
-	let trading, addrs = [], owner, oracle, usdc, pika, pikaStaking, vaultFeeReward, vaultTokenReward, rewardToken, orderbook, feeCalculator;
+	let trading, addrs = [], owner, oracle, usdc, pika, vePikaFeeReward, vaultFeeReward, vaultTokenReward, rewardToken, orderbook, feeCalculator;
 
 	before(async () => {
 
@@ -98,8 +99,13 @@ describe("Trading", () => {
 		const tradingContract = await ethers.getContractFactory("PikaPerpV2");
 		trading = await tradingContract.deploy(usdc.address, 1000000, oracle.address, feeCalculator.address);
 
-		const vePIKAFeeRewardContract = await ethers.getContractFactory("PikaStaking");
-		pikaStaking = await pikaStakingContract.deploy(pika.address, usdc.address);
+		const pikaMineContract = await hre.ethers.getContractFactory("PikaMine")
+		const pikaMine = await pikaMineContract.connect(owner).deploy();
+		await pikaMine.initialize(
+			pika.address
+		)
+		const vePIKAFeeRewardContract = await ethers.getContractFactory("VePikaFeeReward");
+		vePikaFeeReward = await vePIKAFeeRewardContract.deploy(pika.address, usdc.address);
 		const vaultFeeRewardContract = await ethers.getContractFactory("VaultFeeReward");
 		vaultFeeReward = await vaultFeeRewardContract.deploy(trading.address, usdc.address, 1000000);
 		const mockRewardTokenContract = await ethers.getContractFactory("TestUSDC");
@@ -108,12 +114,12 @@ describe("Trading", () => {
 		const vaultTokenRewardContract = await ethers.getContractFactory("VaultTokenReward");
 		vaultTokenReward = await vaultTokenRewardContract.deploy(owner.address, rewardToken.address, trading.address);
 
-		await trading.setDistributors(addrs[2].address, pikaStaking.address, vaultFeeReward.address, vaultTokenReward.address);
-		await pikaStaking.setPikaPerp(trading.address);
+		await trading.setDistributors(addrs[2].address, vePikaFeeReward.address, vaultFeeReward.address, vaultTokenReward.address);
+		await vePikaFeeReward.setPikaPerp(trading.address);
 		await vaultFeeReward.setPikaPerp(trading.address);
-		await pika.approve(pikaStaking.address, "1000000000000000000000000000");
+		await pika.approve(vePikaFeeReward.address, "1000000000000000000000000000");
 		await pika.transfer(addrs[1].address, "10000000000000000000000000")
-		await pika.connect(addrs[1]).approve(pikaStaking.address, "1000000000000000000000000000");
+		await pika.connect(addrs[1]).approve(vePikaFeeReward.address, "1000000000000000000000000000");
 
 		const orderbookContract = await ethers.getContractFactory("OrderBook");
 		orderbook = await orderbookContract.deploy(trading.address, oracle.address, usdc.address, "1000000",
@@ -417,39 +423,6 @@ describe("Trading", () => {
 			await trading.connect(owner).redeem(owner.address, 5000000000000, owner.address); // redeem half
 			const userBalanceNow = await usdc.balanceOf(owner.address);
 			assertAlmostEqual(userBalanceNow.sub(userBalanceStart), vault1.balance.div(100).div(2))
-		})
-
-		it(`pika staking`, async () => {
-			// staking
-			const pendingPikaReward = await trading.getPendingPikaReward();
-			await pikaStaking.connect(owner).stake("100000000000000000000");
-			expect(await usdc.balanceOf(pikaStaking.address)).to.be.equal(pendingPikaReward);
-			expect(await trading.getPendingPikaReward()).to.be.equal(0);
-			await trading.connect(addrs[userId]).openPosition(addrs[userId].address, productId, margin, true, leverage.toString());
-			await pikaStaking.connect(owner).stake("100000000000000000000");
-			expect((await pikaStaking.getClaimableReward(owner.address)).toString()).to.be.equal("3000000");
-			await trading.connect(addrs[userId]).openPosition(addrs[userId].address, productId, margin, true, leverage.toString());
-			await pikaStaking.connect(addrs[1]).stake("100000000000000000000");
-			expect((await pikaStaking.getClaimableReward(owner.address)).toString()).to.be.equal("6000000");
-			expect(await pikaStaking.totalSupply()).to.be.equal("300000000000000000000");
-
-			await trading.connect(addrs[userId]).openPosition(addrs[userId].address, productId, margin, true, leverage.toString());
-			expect((await pikaStaking.getClaimableReward(owner.address)).toString()).to.be.equal("8000000");
-			expect((await pikaStaking.connect(addrs[1]).getClaimableReward(addrs[1].address)).toString()).to.be.equal("1000000");
-			// claim
-			const usdcBeforeClaim = await usdc.balanceOf(owner.address);
-			await pikaStaking.connect(owner).claimReward();
-			expect((await usdc.balanceOf(owner.address)).sub(usdcBeforeClaim)).to.be.equal("8000000");
-			// withdraw
-			const pikaBalanceBefore = await pika.balanceOf(addrs[1].address);
-			await pikaStaking.connect(addrs[1]).withdraw("100000000000000000000");
-			expect((await pika.balanceOf(addrs[1].address)).sub(pikaBalanceBefore), "100000000000000000000");
-			const usdcBeforeClaim2 = await usdc.balanceOf(addrs[1].address);
-			await pikaStaking.connect(addrs[1]).claimReward();
-			expect((await usdc.balanceOf(addrs[1].address)).sub(usdcBeforeClaim2)).to.be.equal("1000000");
-
-			await trading.connect(addrs[userId]).closePosition(addrs[userId].address, productId, margin*3, true);
-
 		})
 
 		it(`vault fee reward`, async () => {

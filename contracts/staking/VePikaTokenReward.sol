@@ -4,57 +4,51 @@ pragma solidity ^0.8.0;
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/utils/math/Math.sol";
-import "./IVotingEscrow.sol";
+import '../staking/PikaMine.sol';
 
-
-/** @title VePIKARewards
-    @notice Gauge like contract that simulates vePIKA stake. Forked from: https://github.com/ribbon-finance/governance/blob/main/contracts/rbn-staking/VeRBNRewards.sol
+/** @title VePikaTokenReward
+    @notice Contract to distribute token rewards for vePIKA holders. Adapted from: https://github.com/ribbon-finance/governance/blob/main/contracts/rbn-staking/VeRBNRewards.sol
  */
 
-contract VeTokenPikaRewards {
+contract VePikaTokenReward {
     using SafeERC20 for IERC20;
 
     IERC20 public rewardToken; // immutable are breaking coverage software should be added back after.
-    IVotingEscrow public veToken; // immutable
-    uint256 public constant DURATION = 30 days;
+    IERC20 public veToken; // immutable
+    PikaMine public pikaMine;
+    uint256 public duration = 30 days;
     uint256 public periodFinish = 0;
     uint256 public rewardRate = 0;
     uint256 public lastUpdateTime;
     uint256 public rewardPerTokenStored;
-    uint256 public queuedRewards = 0;
     uint256 public currentRewards = 0;
     uint256 public historicalRewards = 0;
     address public gov;
     mapping(address => uint256) public userRewardPerTokenPaid;
     mapping(address => uint256) public rewards;
-    mapping(address => uint256) public lastBalance;
-    // whitelisted addresses have right to claim and lock into veRBN on anothers behalf
-    mapping(address => bool) public whitelist;
 
+    event RewardDurationUpdated(uint256 newDuration);
     event RewardAdded(uint256 reward);
-    event Donate(uint256 amount);
     event RewardPaid(address indexed user, uint256 reward);
     event UpdatedGov(address gov);
-    event UpdatedWhitelist(address recipient, bool isWhitelisted);
 
     constructor(
         address veToken_,
         address rewardToken_,
-        address gov_
+        address pikaMine_
     ) {
-        veToken = IVotingEscrow(veToken_);
+        veToken = IERC20(veToken_);
         rewardToken = IERC20(rewardToken_);
-        gov = gov_;
+        pikaMine = PikaMine(pikaMine_);
+        gov = msg.sender;
     }
 
     modifier _updateReward(address account) {
         rewardPerTokenStored = rewardPerToken();
         lastUpdateTime = lastTimeRewardApplicable();
-
         if (account != address(0)) {
             rewards[account] = _earnedReward(account);
             userRewardPerTokenPaid[account] = rewardPerTokenStored;
-            lastBalance[account] = veToken.balanceOf(account);
         }
         _;
     }
@@ -83,12 +77,7 @@ contract VeTokenPikaRewards {
     }
 
     function _earnedReward(address account) internal view returns (uint256) {
-        // since veToken balance decays linearly, use the current and last balance to get average balance
-        return
-        ((veToken.balanceOf(account) + lastBalance[account] / 2) *
-        (rewardPerToken() - userRewardPerTokenPaid[account])) /
-        1e18 +
-        rewards[account];
+        return (veToken.balanceOf(account) * (rewardPerToken() - userRewardPerTokenPaid[account])) / 1e18 + rewards[account];
     }
 
     /** @notice earning for an account
@@ -107,86 +96,35 @@ contract VeTokenPikaRewards {
     _updateReward(_account)
     returns (bool)
     {
-        require(msg.sender == address(veToken), "!authorized");
+        require(msg.sender == address(pikaMine), "!authorized");
 
-        return true;
-    }
-
-    /**
-     * @notice
-     *  Get rewards for an account
-     * @dev rewards are transfer to _account
-     * @param _account to claim rewards for
-     * @param _lock should it lock rewards into veRBN
-     * @return true
-     */
-    function getRewardFor(address _account, bool _lock) external returns (bool) {
-        _getReward(_account, (whitelist[msg.sender] || msg.sender == _account) ? _lock : false);
         return true;
     }
 
     /**
      * @notice
      *  Get rewards
-     * @param _lock should it lock rewards into veRBN
-     * @return true
      */
-    function getReward(bool _lock) external returns (bool) {
-        _getReward(msg.sender, _lock);
-        return true;
+    function getReward() external {
+        _getReward(msg.sender);
     }
 
-    /**
-     * @notice
-     *  Get rewards
-     * @return true
-     */
-    function getReward() external returns (bool) {
-        _getReward(msg.sender, false);
-        return true;
-    }
-
-    function _getReward(address _account, bool _lock)
+    function _getReward(address _account)
     internal
     _updateReward(_account)
     {
         uint256 reward = rewards[_account];
         if (reward == 0) return;
         rewards[_account] = 0;
-
-        if (_lock) {
-            SafeERC20.safeApprove(rewardToken, address(veToken), reward);
-            veToken.deposit_for(_account, reward);
-        } else {
-            SafeERC20.safeTransfer(rewardToken, _account, reward);
-        }
+        SafeERC20.safeTransfer(rewardToken, _account, reward);
 
         emit RewardPaid(_account, reward);
     }
 
     /**
      * @notice
-     *  Donate tokens to distribute as rewards
-     * @dev Do not trigger rewardRate recalculation
-     * @param _amount token to donate
-     * @return true
-     */
-    function donate(uint256 _amount) external returns (bool) {
-        require(_amount != 0, "==0");
-        IERC20(rewardToken).safeTransferFrom(
-            msg.sender,
-            address(this),
-            _amount
-        );
-        queuedRewards = queuedRewards + _amount;
-        emit Donate(_amount);
-        return true;
-    }
-
-    /**
-     * @notice
-     * Add new rewards to be distributed over a month
-     * @dev Trigger rewardRate recalculation using _amount and queuedRewards
+     * Add new rewards to be distributed over the duration
+     * @dev Trigger rewardRate recalculation using _amount
      * @param _amount token to add to rewards
      * @return true
      */
@@ -197,11 +135,7 @@ contract VeTokenPikaRewards {
             address(this),
             _amount
         );
-
-        _amount = _amount + queuedRewards;
         _notifyRewardAmount(_amount);
-        queuedRewards = 0;
-
         return true;
     }
 
@@ -211,17 +145,24 @@ contract VeTokenPikaRewards {
     {
         historicalRewards = historicalRewards + reward;
         if (block.timestamp >= periodFinish) {
-            rewardRate = reward / DURATION;
+            rewardRate = reward / duration;
         } else {
             uint256 remaining = periodFinish - block.timestamp;
             uint256 leftover = remaining * rewardRate;
             reward = reward + leftover;
-            rewardRate = reward / DURATION;
+            rewardRate = reward / duration;
         }
         currentRewards = reward;
         lastUpdateTime = block.timestamp;
-        periodFinish = block.timestamp + DURATION;
+        periodFinish = block.timestamp + duration;
         emit RewardAdded(reward);
+    }
+
+    function setDuration(uint256 _duration) external {
+        require(msg.sender == gov, "!authorized");
+        require(block.timestamp >= periodFinish, "Not finished yet");
+        duration = _duration;
+        emit RewardDurationUpdated(_duration);
     }
 
     /**
@@ -240,25 +181,10 @@ contract VeTokenPikaRewards {
         return true;
     }
 
-    /**
-     * @notice
-     * add to whitelist
-     * @dev Can be called by gov
-     * @param _addr  address to whitelist
-     * @param _isWhitelist whether to whitelist or blacklist
-     */
-    function addToWhitelist(address _addr, bool _isWhitelist) external {
-        require(msg.sender == gov, "!authorized");
-
-        require(_addr != address(0), "0 address");
-        whitelist[_addr] = _isWhitelist;
-        emit UpdatedWhitelist(_addr, _isWhitelist);
-    }
-
     function sweep(address _token) external returns (bool) {
         require(msg.sender == gov, "!authorized");
         require(
-            _token != address(rewardToken) || veToken.is_unlocked(),
+            _token != address(rewardToken) || pikaMine.isUnlocked(),
             "!rewardToken"
         );
 

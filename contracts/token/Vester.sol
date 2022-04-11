@@ -6,7 +6,6 @@ import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 import "./IPika.sol";
-import "hardhat/console.sol";
 
 contract Vester is Ownable {
     using SafeERC20 for IERC20;
@@ -61,7 +60,6 @@ contract Vester is Ownable {
         totalEsPikaDeposit -= _amount;
         claim(_depositId);
         uint256 amountAvailable = user.depositAmount - user.claimedAmount;
-        console.log(amountAvailable, _amount);
         if(amountAvailable >= _amount) {
             _amount = amountAvailable;
         }
@@ -75,7 +73,6 @@ contract Vester is Ownable {
         uint256 amountToClaim = claimable(msg.sender, _depositId);
         user.claimedAmount += amountToClaim;
         user.vestingLastUpdate = block.timestamp;
-        console.log(amountToClaim, IERC20(esPika).balanceOf(address(this)));
         IPika(esPika).burn(amountToClaim);
         totalPikaClaimed += amountToClaim;
         IERC20(pika).safeTransfer(msg.sender, amountToClaim);
@@ -101,6 +98,7 @@ contract Vester is Ownable {
     }
 
     function claimableAll(address _account) external view returns(uint256 claimableAmount) {
+        claimableAmount = 0;
         uint256 len = allUserDepositIds[_account].length();
         for (uint256 i = 0; i < len; i++) {
             uint256 depositId = allUserDepositIds[_account].at(i);
@@ -152,11 +150,16 @@ contract Vester is Ownable {
     }
 
     function depositedAll(address _account) external view returns(uint256 depositedAllAmount) {
+        depositedAllAmount = 0;
         uint256 len = allUserDepositIds[_account].length();
         for (uint256 i = 0; i < len; i++) {
             uint256 depositId = allUserDepositIds[_account].at(i);
             depositedAllAmount += deposited(_account, depositId);
         }
+    }
+
+    function getAllUserDepositIds(address _user) public view returns (uint256[] memory) {
+        return allUserDepositIds[_user].values();
     }
 
     function _addDeposit(address _user) internal virtual returns (UserInfo storage user, uint256 newDepositId) {

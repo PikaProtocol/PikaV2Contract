@@ -37,13 +37,13 @@ describe("Staking", function () {
     beforeEach(async function () {
         this.rewardToken1 = await this.tokenERC.deploy(18)
         this.rewardToken2 = await this.tokenERC.deploy(18)
-        this.pika = await pikaContract.deploy("Pika", "PIKA", "1000000000000000000000000000", owner.address, owner.address)
+        this.pika = await this.pikaContract.deploy("Pika", "PIKA", "1000000000000000000000000000", this.owner.address, this.owner.address)
         this.staking = await this.stakingContract.deploy(this.rewardToken1.address, 86400 * 7, this.rewardDistributor.address, this.pika.address)
         this.rewardToken1.mint(this.rewardDistributor.address, "10000000000000000000000")
         this.rewardToken2.mint(this.rewardDistributor.address, "10000000000000000000000")
         this.pika.mint(this.stakingAccount1.address, "10000000000000000000000")
         this.pika.mint(this.stakingAccount2.address, "10000000000000000000000")
-        this.pika.unlock();
+        await this.pika.setTransfersAllowed(true);
     })
 
 

@@ -16,7 +16,7 @@ describe("Pika", function () {
   })
 
   beforeEach(async function () {
-    this.pika = await this.pikaContract.deploy("Pika", "PIKA", 1000000000000000000000000000, this.owner.address, this.owner.address)
+    this.pika = await this.pikaContract.deploy("Pika", "PIKA", "1000000000000000000000000000", this.owner.address, this.owner.address)
   })
 
 
@@ -37,8 +37,8 @@ describe("Pika", function () {
 
   describe("test setMinter", async function(){
     it("setMinter", async function () {
-      await this.pika.connect(this.owner).setMinter(this.alice.address)
-      await expect(this.pika.connect(this.owner).mint(this.bob.address, "10000000000000000000000")).to.be.revertedWith("mint: only the minter can mint")
+      await this.pika.connect(this.owner).grantRole("0xf0887ba65ee2024ea881d91b74c2450ef19e1557f03bed3ea9f16b037cbe2dc9", this.alice.address)
+      await expect(this.pika.connect(this.bob).mint(this.bob.address, "10000000000000000000000")).to.be.revertedWith("PIKA: only minter")
       // expect(await this.pika.expect)
       await this.pika.connect(this.alice).mint(this.bob.address, "10000000000000000000000")
       expect(await this.pika.totalSupply()).to.be.equal("1000010000000000000000000000")
@@ -51,8 +51,8 @@ describe("Pika", function () {
       await this.pika.connect(this.owner).mint(this.alice.address, "10000000000000000000000")
       await expect(
           this.pika.connect(this.alice).transfer(this.bob.address, "10000000000000000000000")
-      ).to.be.revertedWith("PIKA::_transferTokens: transfer is not allowed");
-      await this.pika.unlock()
+      ).to.be.revertedWith("PIKA: no transfer privileges");
+      await this.pika.setTransfersAllowed(true);
       await this.pika.connect(this.alice).transfer(this.bob.address, "10000000000000000000000")
       expect(await this.pika.balanceOf(this.alice.address)).to.be.equal("0")
       expect(await this.pika.balanceOf(this.bob.address)).to.be.equal("10000000000000000000000")
@@ -60,12 +60,12 @@ describe("Pika", function () {
 
     it("transferFrom", async function () {
       await this.pika.connect(this.owner).mint(this.alice.address, "10000000000000000000000")
-      await this.pika.connect(this.alice).approve(this.owner.address, "10000000000000000000000")
+      await this.pika.connect(this.alice).approve(this.bob.address, "10000000000000000000000")
       await expect(
-        this.pika.connect(this.owner).transferFrom(this.alice.address, this.bob.address, "10000000000000000000000")
-      ).to.be.revertedWith("PIKA::_transferTokens: transfer is not allowed")
-      await this.pika.unlock()
-      await this.pika.connect(this.owner).transferFrom(this.alice.address, this.bob.address, "10000000000000000000000")
+        this.pika.connect(this.bob).transferFrom(this.alice.address, this.bob.address, "10000000000000000000000")
+      ).to.be.revertedWith("PIKA: no transfer privileges")
+      await this.pika.setTransfersAllowed(true);
+      await this.pika.connect(this.bob).transferFrom(this.alice.address, this.bob.address, "10000000000000000000000")
       expect(await this.pika.balanceOf(this.alice.address)).to.be.equal("0")
       expect(await this.pika.balanceOf(this.bob.address)).to.be.equal("10000000000000000000000")
     })

@@ -7,9 +7,8 @@ import "@openzeppelin/contracts/utils/Address.sol";
 import "@openzeppelin/contracts/security/Pausable.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "../perp/IPikaPerp.sol";
-import "./IVotingEscrow.sol";
 
-contract VePikaFeeRewards is ReentrancyGuard, Pausable {
+contract VePikaFeeReward is ReentrancyGuard, Pausable {
 
     using SafeERC20 for IERC20;
     using Address for address payable;
@@ -17,13 +16,12 @@ contract VePikaFeeRewards is ReentrancyGuard, Pausable {
     address public owner;
     address public pikaPerp;
     address public rewardToken;
-    IVotingEscrow public veToken; // immutable
+    IERC20 public veToken; // immutable
 
     uint256 public cumulativeRewardPerTokenStored;
 
     mapping(address => uint256) private claimableReward;
     mapping(address => uint256) private previousRewardPerToken;
-    mapping(address => uint256) public lastBalance;
 
     uint256 public constant PRECISION = 10**18;
     event ClaimedReward(
@@ -34,7 +32,7 @@ contract VePikaFeeRewards is ReentrancyGuard, Pausable {
 
     constructor(address _veToken, address _rewardToken) {
         owner = msg.sender;
-        veToken = IVotingEscrow(_veToken);
+        veToken = IERC20(_veToken);
         rewardToken = _rewardToken;
     }
 
@@ -68,10 +66,8 @@ contract VePikaFeeRewards is ReentrancyGuard, Pausable {
             cumulativeRewardPerTokenStored += pikaReward * PRECISION / _totalSupply;
         }
         if (cumulativeRewardPerTokenStored == 0) return;
-
-        claimableReward[account] += (veToken.balanceOf(account) + lastBalance[account]) / 2 * (cumulativeRewardPerTokenStored - previousRewardPerToken[account]) / PRECISION;
+        claimableReward[account] += veToken.balanceOf(account) * (cumulativeRewardPerTokenStored - previousRewardPerToken[account]) / PRECISION;
         previousRewardPerToken[account] = cumulativeRewardPerTokenStored;
-        lastBalance[account] = veToken.balanceOf(account);
     }
 
     function claimReward() external {
@@ -96,8 +92,7 @@ contract VePikaFeeRewards is ReentrancyGuard, Pausable {
         uint256 _pendingReward = IPikaPerp(pikaPerp).getPendingPikaReward();
         uint256 _rewardPerTokenStored = cumulativeRewardPerTokenStored + _pendingReward * PRECISION / totalSupply;
         if (_rewardPerTokenStored == 0) return currentClaimableReward;
-
-        return currentClaimableReward + (veToken.balanceOf(account) + lastBalance[account]) / 2 * (_rewardPerTokenStored - previousRewardPerToken[account]) / PRECISION;
+        return currentClaimableReward + veToken.balanceOf(account) * (_rewardPerTokenStored - previousRewardPerToken[account]) / PRECISION;
     }
 
     fallback() external payable {}

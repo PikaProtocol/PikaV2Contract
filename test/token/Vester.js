@@ -38,7 +38,7 @@ describe("Vester", function () {
     await pika.setTransfersAllowed(true);
     esPika = await pikaContract.deploy("Pika", "PIKA", "1000000000000000000000000000", owner.address, owner.address)
     vester = await vesterContract.deploy(esPika.address, pika.address);
-    await pika.connect(owner).transfer(vester.address, "3000000000000000000000") //2000 pika
+    await pika.connect(owner).transfer(vester.address, "3000000000000000000000") //3000 pika
     await esPika.connect(owner).grantRole("0x9143236d81225394f3bd65b44e6e29fdf4d7ba0773d9bb3f5cc15eb80ba37777", owner.address)
     await esPika.connect(owner).grantRole("0x9143236d81225394f3bd65b44e6e29fdf4d7ba0773d9bb3f5cc15eb80ba37777", vester.address)
     await esPika.connect(owner).transfer(alice.address, "10000000000000000000000") //10000 esPika
@@ -62,25 +62,25 @@ describe("Vester", function () {
       assertAlmostEqual(await vester.connect(alice).claimableAll(alice.address), "1000000000000000000000")
 
       await vester.connect(alice).claimAll();
-      console.log("pika balance", await pika.balanceOf(alice.address))
+      // console.log("pika balance", await pika.balanceOf(alice.address))
       assertAlmostEqual(await pika.balanceOf(alice.address), "1000000000000000000000")
 
       await vester.connect(alice).deposit("1000000000000000000000")
 
       await provider.send("evm_increaseTime", [86400*365/4])
       await provider.send("evm_mine")
-      console.log("claimable", await vester.connect(alice).claimableAll(alice.address));
+      // console.log("claimable", await vester.connect(alice).claimableAll(alice.address));
       assertAlmostEqual(await vester.connect(alice).claimableAll(alice.address), "750000000000000000000")
       await vester.connect(alice).claimAll();
       assertAlmostEqual(await pika.balanceOf(alice.address), "1750000000000000000000")
-      console.log("vested", await vester.unvested(alice.address, 1), await vester.vested(alice.address, 1))
+      // console.log("vested", await vester.unvested(alice.address, 1), await vester.vested(alice.address, 1))
       await vester.connect(alice).withdraw("250000000000000000000", 1)
 
       await provider.send("evm_increaseTime", [86400*365/4])
       await provider.send("evm_mine")
-      console.log(await vester.connect(alice).claimableAll(alice.address))
-      console.log(await vester.connect(alice).claimable(alice.address, 1), await vester.connect(alice).claimable(alice.address, 2), await vester.connect(alice).claimable(alice.address, 3), await vester.connect(alice).claimable(alice.address, 4))
-      console.log(await vester.connect(alice).claimed(alice.address, 1), await vester.connect(alice).deposited(alice.address, 1))
+      // console.log(await vester.connect(alice).claimableAll(alice.address))
+      // console.log(await vester.connect(alice).claimable(alice.address, 1), await vester.connect(alice).claimable(alice.address, 2), await vester.connect(alice).claimable(alice.address, 3), await vester.connect(alice).claimable(alice.address, 4))
+      // console.log(await vester.connect(alice).claimed(alice.address, 1), await vester.connect(alice).deposited(alice.address, 1))
       assertAlmostEqual(await vester.connect(alice).claimableAll(alice.address), "500000000000000000000")
 
       await provider.send("evm_increaseTime", [86400*365/4])
@@ -93,7 +93,7 @@ describe("Vester", function () {
       await provider.send("evm_increaseTime", [86400*365/2])
       await provider.send("evm_mine")
       assertAlmostEqual(await vester.connect(alice).claimableAll(alice.address), "250000000000000000000")
-      console.log(await vester.connect(alice).claimable(alice.address, 1), await vester.connect(alice).claimable(alice.address, 2), await vester.connect(alice).claimable(alice.address, 3), await vester.connect(alice).claimable(alice.address, 4))
+      // console.log(await vester.connect(alice).claimable(alice.address, 1), await vester.connect(alice).claimable(alice.address, 2), await vester.connect(alice).claimable(alice.address, 3), await vester.connect(alice).claimable(alice.address, 4))
       // await vester.connect(alice).claimAll();
     })
   })

@@ -69,9 +69,9 @@ function assertAlmostEqual(actual, expected, accuracy = 10000000) {
 }
 
 
-describe("Trading", () => {
+describe("Trading ETH", () => {
 
-	let trading, addrs = [], owner, oracle, usdc, pika, pikaStaking, vaultFeeReward, vaultTokenReward, rewardToken, orderbook, feeCalculator;
+	let trading, addrs = [], owner, oracle, usdc, pika, vePikaFeeReward, vaultFeeReward, vaultTokenReward, rewardToken, orderbook, feeCalculator;
 
 	before(async () => {
 
@@ -87,11 +87,11 @@ describe("Trading", () => {
 		const tradingContract = await ethers.getContractFactory("PikaPerpV2");
 		trading = await tradingContract.deploy("0x0000000000000000000000000000000000000000", "1000000000000000000", oracle.address, feeCalculator.address);
 
-        const pikaContract = await ethers.getContractFactory("Pika");
-        pika = await pikaContract.deploy(owner.address, owner.address);
-        await pika.unlock();
-        const pikaStakingContract = await ethers.getContractFactory("PikaStaking");
-        pikaStaking = await pikaStakingContract.deploy(pika.address, "0x0000000000000000000000000000000000000000");
+		const pikaContract = await ethers.getContractFactory("Pika");
+		pika = await pikaContract.deploy("Pika", "PIKA", "1000000000000000000000000000", owner.address, owner.address)
+		await pika.setTransfersAllowed(true);
+        const vePikaFeeRewardContract = await ethers.getContractFactory("VePikaFeeReward");
+        vePikaFeeReward = await vePikaFeeRewardContract.deploy(pika.address, "0x0000000000000000000000000000000000000000");
         const vaultFeeRewardContract = await ethers.getContractFactory("VaultFeeReward");
         vaultFeeReward = await vaultFeeRewardContract.deploy(trading.address,"0x0000000000000000000000000000000000000000", "1000000000000000000");
         const mockRewardTokenContract = await ethers.getContractFactory("TestUSDC");
@@ -100,12 +100,12 @@ describe("Trading", () => {
         const vaultTokenRewardContract = await ethers.getContractFactory("VaultTokenReward");
         vaultTokenReward = await vaultTokenRewardContract.deploy(owner.address, rewardToken.address, trading.address);
 
-        await trading.setDistributors(addrs[2].address, pikaStaking.address, vaultFeeReward.address, vaultTokenReward.address);
-        await pikaStaking.setPikaPerp(trading.address);
+        await trading.setDistributors(addrs[2].address, vePikaFeeReward.address, vaultFeeReward.address, vaultTokenReward.address);
+        await vePikaFeeReward.setPikaPerp(trading.address);
         await vaultFeeReward.setPikaPerp(trading.address);
-        await pika.approve(pikaStaking.address, "1000000000000000000000000000");
+        await pika.approve(vePikaFeeReward.address, "1000000000000000000000000000");
         await pika.transfer(addrs[1].address, "10000000000000000000000000")
-        await pika.connect(addrs[1]).approve(pikaStaking.address, "1000000000000000000000000000");
+        await pika.connect(addrs[1]).approve(vePikaFeeReward.address, "1000000000000000000000000000");
 
 		const orderbookContract = await ethers.getContractFactory("OrderBook");
 		orderbook = await orderbookContract.deploy(trading.address, oracle.address, "0x0000000000000000000000000000000000000000", "1000000000000000000",
@@ -387,40 +387,6 @@ describe("Trading", () => {
 			// const userBalanceNow = await provider.getBalance(owner.address);
 			// assertAlmostEqual(userBalanceNow.sub(userBalanceStart), vault1.balance.div(100).div(2))
 		})
-
-		it(`pika staking`, async () => {
-			// staking
-			let fee = margin*leverage/1e8*0.001;
-			const pendingPikaReward = await trading.getPendingPikaReward();
-			await pikaStaking.connect(owner).stake("100000000000000000000");
-			expect(await provider.getBalance(pikaStaking.address)).to.be.equal(pendingPikaReward);
-			expect(await trading.getPendingPikaReward()).to.be.equal(0);
-			await trading.connect(addrs[userId]).openPosition(addrs[userId].address, productId, margin, true, leverage.toString(), {from: addrs[1].address, value:  (margin*1e10 + fee*2e10).toString(), gasPrice: gasPrice});
-			await pikaStaking.connect(owner).stake("100000000000000000000");
-			expect((await pikaStaking.getClaimableReward(owner.address)).toString()).to.be.equal("3000000000000000");
-			await trading.connect(addrs[userId]).openPosition(addrs[userId].address, productId, margin, true, leverage.toString(), {from: addrs[userId].address, value:  (margin*1e10 + fee*2e10).toString(), gasPrice: gasPrice});
-			await pikaStaking.connect(addrs[1]).stake("100000000000000000000");
-			expect((await pikaStaking.getClaimableReward(owner.address)).toString()).to.be.equal("6000000000000000");
-			expect(await pikaStaking.totalSupply()).to.be.equal("300000000000000000000");
-
-			await trading.connect(addrs[userId]).openPosition(addrs[userId].address, productId, margin, true, leverage.toString(), {from: addrs[userId].address, value:  (margin*1e10 + fee*2e10).toString(), gasPrice: gasPrice});
-			expect((await pikaStaking.getClaimableReward(owner.address)).toString()).to.be.equal("8000000000000000");
-			expect((await pikaStaking.connect(addrs[1]).getClaimableReward(addrs[1].address)).toString()).to.be.equal("1000000000000000");
-			// claim
-			const ethBeforeClaim = await provider.getBalance(owner.address);
-			await pikaStaking.connect(owner).claimReward();
-			assertAlmostEqual((await provider.getBalance(owner.address)).sub(ethBeforeClaim), "8000000000000000", 10);
-			// withdraw
-			const pikaBalanceBefore = await pika.balanceOf(addrs[1].address);
-			await pikaStaking.connect(addrs[1]).withdraw("100000000000000000000");
-			expect((await pika.balanceOf(addrs[1].address)).sub(pikaBalanceBefore), "100000000000000000000");
-			const ethBeforeClaim2 = await provider.getBalance(addrs[1].address);
-			await pikaStaking.connect(addrs[1]).claimReward();
-			assertAlmostEqual((await provider.getBalance(addrs[1].address)).sub(ethBeforeClaim2), "1000000000000000", 1);
-
-			await trading.connect(addrs[userId]).closePosition(addrs[userId].address, productId, margin*3, true);
-		})
-
 
         it(`vault fee reward`, async () => {
             // redeem all
