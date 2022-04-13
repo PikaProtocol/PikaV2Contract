@@ -84,16 +84,48 @@ library PerpLib {
         return _pnl;
     }
 
-    function _getTradeFee(
-        uint256 margin,
+    function _getFeeRate(
+        uint256 fee,
+        address productToken,
+        address user,
+        address feeCalculator
+    ) view internal returns(uint256) {
+        int256 dynamicFee = IFeeCalculator(feeCalculator).getFee(productToken, user);
+        return dynamicFee > 0 ? fee + uint256(dynamicFee) : fee - uint256(-1*dynamicFee);
+    }
+
+    function _getRealMarginAndFee(
+        uint256 marginAndFee,
         uint256 leverage,
         uint256 fee,
         address productToken,
         address user,
         address feeCalculator
+    ) internal view returns(uint256, uint256) {
+        uint256 margin = marginAndFee / (1 + _getFeeRate(fee, productToken, user, feeCalculator) * leverage);
+        return (margin, marginAndFee - margin);
+    }
+
+    function _calculatePrice(
+        address productToken,
+        bool isLong,
+        uint256 openInterestLong,
+        uint256 openInterestShort,
+        uint256 maxExposure,
+        uint256 reserve,
+        uint256 amount,
+        uint256 maxShift,
+        uint256 oraclePrice
     ) internal view returns(uint256) {
-        int256 dynamicFee = IFeeCalculator(feeCalculator).getFee(productToken, user);
-        fee = dynamicFee > 0 ? fee + uint256(dynamicFee) : fee - uint256(-1*dynamicFee);
-        return margin * leverage / BASE * fee / 10**4;
+        int256 shift = (int256(openInterestLong) - int256(openInterestShort)) * int256(maxShift) / int256(maxExposure);
+        if (isLong) {
+            uint256 slippage = (reserve * reserve / (reserve - amount) - reserve) * BASE / amount;
+            slippage = shift >= 0 ? slippage + uint256(shift) : slippage - uint256(-1 * shift) / 2;
+            return oraclePrice * slippage / BASE;
+        } else {
+            uint256 slippage = (reserve - reserve * reserve / (reserve + amount)) * BASE / amount;
+            slippage = shift >= 0 ? slippage + uint256(shift) / 2 : slippage - uint256(-1 * shift);
+            return oraclePrice * slippage / BASE;
+        }
     }
 }

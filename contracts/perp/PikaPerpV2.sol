@@ -99,7 +99,7 @@ contract PikaPerpV2 is ReentrancyGuard {
     bool canUserStake = false;
     bool allowPublicLiquidator = false;
     bool isTradeEnabled = true;
-    Vault private vault;
+    Vault public vault;
 
     mapping(uint256 => Product) private products;
     mapping(address => Stake) private stakes;
@@ -182,9 +182,6 @@ contract PikaPerpV2 is ReentrancyGuard {
     event ProductUpdated(
         uint256 productId,
         Product product
-    );
-    event OwnerUpdated(
-        address newOwner
     );
 
     // Constructor
@@ -299,16 +296,17 @@ contract PikaPerpV2 is ReentrancyGuard {
         require(leverage <= uint256(product.maxLeverage), "!max-leverage");
 
         // Transfer margin plus fee
-        uint256 tradeFee = PerpLib._getTradeFee(margin, leverage, uint256(product.fee), product.productToken, user, feeCalculator);
+        uint256 tradeFee;
+        (margin, tradeFee) = PerpLib._getRealMarginAndFee(margin, leverage, uint256(product.fee), product.productToken, user, feeCalculator);
         IERC20(token).uniTransferFromSenderToThis((margin.add(tradeFee)).mul(tokenBase).div(BASE));
         pendingProtocolReward = pendingProtocolReward.add(tradeFee.mul(protocolRewardRatio).div(10**4));
         pendingPikaReward = pendingPikaReward.add(tradeFee.mul(pikaRewardRatio).div(10**4));
         pendingVaultReward = pendingVaultReward.add(tradeFee.mul(10**4 - protocolRewardRatio - pikaRewardRatio).div(10**4));
 
         uint256 amount = margin.mul(leverage).div(BASE);
-        uint256 price = _calculatePrice(product.productToken, isLong, product.openInterestLong,
+        uint256 price = PerpLib._calculatePrice(product.productToken, isLong, product.openInterestLong,
             product.openInterestShort, uint256(vault.balance).mul(uint256(product.weight)).mul(exposureMultiplier).div(uint256(totalWeight)).div(10**4),
-            uint256(product.reserve), amount);
+            uint256(product.reserve), amount, maxShift, IOracle(oracle).getPrice(product.productToken));
 
         _updateOpenInterest(productId, amount, isLong, true);
 
@@ -404,8 +402,8 @@ contract PikaPerpV2 is ReentrancyGuard {
             isFullClose = true;
         }
         uint256 maxExposure = uint256(vault.balance).mul(uint256(product.weight)).mul(exposureMultiplier).div(uint256(totalWeight)).div(10**4);
-        uint256 price = _calculatePrice(product.productToken, !position.isLong, product.openInterestLong, product.openInterestShort,
-            maxExposure, uint256(product.reserve), margin * position.leverage / BASE);
+        uint256 price = PerpLib._calculatePrice(product.productToken, !position.isLong, product.openInterestLong, product.openInterestShort,
+            maxExposure, uint256(product.reserve), margin * position.leverage / BASE, maxShift, IOracle(oracle).getPrice(product.productToken));
 
         bool isLiquidatable;
         int256 pnl = PerpLib._getPnl(position.isLong, uint256(position.price), uint256(position.leverage), margin, price);
@@ -636,10 +634,6 @@ contract PikaPerpV2 is ReentrancyGuard {
         return pendingVaultReward.mul(tokenBase).div(BASE);
     }
 
-    function getVault() external view returns(Vault memory) {
-        return vault;
-    }
-
     function getProduct(uint256 productId) external view returns (
         address,uint256,uint256,bool,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256
     ) {
@@ -716,28 +710,6 @@ contract PikaPerpV2 is ReentrancyGuard {
 
     // Internal methods
 
-    function _calculatePrice(
-        address productToken,
-        bool isLong,
-        uint256 openInterestLong,
-        uint256 openInterestShort,
-        uint256 maxExposure,
-        uint256 reserve,
-        uint256 amount
-    ) private view returns(uint256) {
-        uint256 oraclePrice = IOracle(oracle).getPrice(productToken);
-        int256 shift = (int256(openInterestLong) - int256(openInterestShort)) * int256(maxShift) / int256(maxExposure);
-        if (isLong) {
-            uint256 slippage = (reserve.mul(reserve).div(reserve.sub(amount)).sub(reserve)).mul(BASE).div(amount);
-            slippage = shift >= 0 ? slippage.add(uint256(shift)) : slippage.sub(uint256(-1 * shift).div(2));
-            return oraclePrice.mul(slippage).div(BASE);
-        } else {
-            uint256 slippage = (reserve.sub(reserve.mul(reserve).div(reserve.add(amount)))).mul(BASE).div(amount);
-            slippage = shift >= 0 ? slippage.add(uint256(shift).div(2)) : slippage.sub(uint256(-1 * shift));
-            return oraclePrice.mul(slippage).div(BASE);
-        }
-    }
-
     function _getPnlWithFee(
         int256 pnl,
         Position memory position,
@@ -747,7 +719,7 @@ contract PikaPerpV2 is ReentrancyGuard {
         address productToken
     ) private view returns(int256 pnlAfterFee, uint256 totalFee) {
         // Subtract trade fee from P/L
-        uint256 tradeFee = PerpLib._getTradeFee(margin, uint256(position.leverage), fee, productToken, position.owner, feeCalculator);
+        uint256 tradeFee = margin * position.leverage / BASE * PerpLib._getFeeRate(fee, productToken, position.owner, feeCalculator) / 10**4;
         pnlAfterFee = pnl.sub(int256(tradeFee));
 
         // Subtract interest from P/L
@@ -861,7 +833,8 @@ contract PikaPerpV2 is ReentrancyGuard {
         bool _canUserStake,
         bool _allowPublicLiquidator,
         uint256 _exposureMultiplier,
-        uint256 _utilizationMultiplier
+        uint256 _utilizationMultiplier,
+        address _feeCalculator
     ) external onlyOwner {
         require(_maxShift <= 0.01e8 && _minProfitTime <= 24 hours);
         maxShift = _maxShift;
@@ -870,14 +843,11 @@ contract PikaPerpV2 is ReentrancyGuard {
         allowPublicLiquidator = _allowPublicLiquidator;
         exposureMultiplier = _exposureMultiplier;
         utilizationMultiplier = _utilizationMultiplier;
+        feeCalculator = _feeCalculator;
     }
 
     function setOracle(address _oracle) external onlyOwner {
         oracle = _oracle;
-    }
-
-    function setFeeCalculator(address _feeCalculator) external onlyOwner {
-        feeCalculator = _feeCalculator;
     }
 
     function setLiquidator(address _liquidator, bool _isActive) external onlyOwner {
@@ -886,7 +856,6 @@ contract PikaPerpV2 is ReentrancyGuard {
 
     function setOwner(address _owner) external onlyOwner {
         owner = _owner;
-        emit OwnerUpdated(_owner);
     }
 
     modifier onlyOwner() {

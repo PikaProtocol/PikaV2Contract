@@ -172,12 +172,12 @@ describe("Trading", () => {
 	});
 
 	it("Owner should setMaxShift", async () => {
-		await trading.setParameters("1000000", "86400", true, true, "10000", "10000");
+		await trading.setParameters("1000000", "86400", true, true, "10000", "10000", feeCalculator.address);
 		expect(await trading.maxShift()).to.equal("1000000");
 		expect(await trading.minProfitTime()).to.equal("86400");
 		expect(await trading.exposureMultiplier()).to.equal("10000");
 		expect(await trading.utilizationMultiplier()).to.equal("10000");
-		await trading.setParameters("300000", "43200", true, true, "10000", "10000");
+		await trading.setParameters("300000", "43200", true, true, "10000", "10000", feeCalculator.address);
 	});
 
 	describe("trade", () => {
