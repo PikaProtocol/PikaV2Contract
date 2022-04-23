@@ -62,7 +62,7 @@ describe("PikaMine", function () {
         await esPika.connect(owner).grantRole("0x9143236d81225394f3bd65b44e6e29fdf4d7ba0773d9bb3f5cc15eb80ba37777", vePikaTokenReward.address)
         await esPika.connect(owner).approve(vePikaTokenReward.address, "100000000000000000000000")
 
-        await pikaMine.setRewardPools(vePikaFeeReward.address, vePikaFeeReward.address, vePikaTokenReward.address)
+        await pikaMine.setRewardPools([vePikaFeeReward.address, vePikaFeeReward.address, vePikaTokenReward.address])
     })
 
     describe("test pikaMine", async function(){

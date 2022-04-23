@@ -9,29 +9,27 @@ contract PikaPriceFeed is Ownable {
     using SafeMath for uint256;
 
     uint256 public lastUpdatedTime;
-    uint256 public lastChainlinkUpdatedTime;
-    uint256 public priceDuration;
+    uint256 public priceDuration = 300; // 5mins
     mapping (address => uint256) public priceMap;
     mapping (address => address) public tokenFeedMap;
-    address public keeper;
+    mapping(address => bool) public keepers;
     bool public isChainlinkOnly = false;
     uint256 public maxPriceDiff = 2e16; // 2%
     uint256 public delta = 20; // 20bp
     uint256 public decay = 9000; // 0.9
-    uint256 public dynamicFee = 0;
 
     event PriceSet(address token, uint256 price, uint256 timestamp);
     event PriceDurationSet(uint256 priceDuration);
     event MaxPriceDiffSet(uint256 maxPriceDiff);
-    event KeeperSet(address keeper);
+    event KeeperSet(address keeper, bool isActive);
+    event DeltaAndDecaySet(uint256 delta, uint256 decay);
     event IsChainlinkOnlySet(bool isChainlinkOnlySet);
 
     uint256 public constant MAX_PRICE_DURATION = 30 minutes;
     uint256 public constant PRICE_BASE = 10000;
 
     constructor() {
-        keeper = msg.sender;
-        priceDuration = 300; // 5mins
+        keepers[msg.sender] = true;
     }
 
     function getPrice(address token) public view returns (uint256) {
@@ -122,9 +120,9 @@ contract PikaPriceFeed is Ownable {
         emit MaxPriceDiffSet(maxPriceDiff);
     }
 
-    function setKeeper(address _keeper) external onlyOwner {
-        keeper = _keeper;
-        emit KeeperSet(keeper);
+    function setKeeper(address _keeper, bool _isActive) external onlyOwner {
+        keepers[_keeper] = _isActive;
+        emit KeeperSet(_keeper, _isActive);
     }
 
     function setIsChainlinkOnly(bool _isChainlinkOnly) external onlyOwner {
@@ -135,10 +133,11 @@ contract PikaPriceFeed is Ownable {
     function setDeltaAndDecay(uint256 _delta, uint256 _decay) external onlyOwner {
         delta = _delta;
         decay = _decay;
+        emit DeltaAndDecaySet(delta, decay);
     }
 
     modifier onlyKeeper() {
-        require(msg.sender == keeper, "!keeper");
+        require(keepers[msg.sender], "!keepers");
         _;
     }
 }

@@ -8,6 +8,9 @@ import "@openzeppelin/contracts/security/Pausable.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "../perp/IPikaPerp.sol";
 
+/** @title VePikaFeeReward
+    @notice Contract to distribute trading fee reward to vePIKA holders.
+ */
 contract VePikaFeeReward is ReentrancyGuard, Pausable {
 
     using SafeERC20 for IERC20;

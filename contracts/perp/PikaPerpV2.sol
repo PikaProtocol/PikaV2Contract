@@ -45,7 +45,6 @@ contract PikaPerpV2 is ReentrancyGuard {
         uint72 maxLeverage; // 9 bytes
         uint16 fee; // In bps. 0.5% = 50. 2 bytes
         bool isActive; // 1 byte
-        // 32 bytes
         uint64 openInterestLong; // 6 bytes
         uint64 openInterestShort; // 6 bytes
         uint16 interest; // For 360 days, in bps. 10% = 1000. 2 bytes
@@ -53,7 +52,7 @@ contract PikaPerpV2 is ReentrancyGuard {
         uint16 liquidationBounty; // In bps. 500 = 5%. 2 bytes
         uint16 minPriceChange; // 1.5%, the minimum oracle price up change for trader to close trade with profit
         uint16 weight; // share of the max exposure
-        uint64 reserve; // Virtual reserve in USDC. Used to calculate slippage
+        uint64 reserve; // Virtual reserve used to calculate slippage
     }
 
     struct Position {
@@ -73,7 +72,6 @@ contract PikaPerpV2 is ReentrancyGuard {
     // Variables
 
     address public owner;
-    address public liquidator;
     address public token;
     uint256 public tokenBase;
     address public oracle;
@@ -191,7 +189,6 @@ contract PikaPerpV2 is ReentrancyGuard {
 
     constructor(address _token, uint256 _tokenBase, address _oracle, address _feeCalculator) {
         owner = msg.sender;
-        liquidator = msg.sender;
         token = _token;
         tokenBase = _tokenBase;
         oracle = _oracle;

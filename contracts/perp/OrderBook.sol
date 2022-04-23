@@ -52,6 +52,7 @@ contract OrderBook is ReentrancyGuard {
     uint256 public minExecutionFee;
     uint256 public minMargin;
     uint256 public maxMargin;
+    address public feeCalculator;
     uint256 public constant BASE = 1e8;
 
     event CreateOpenOrder(
@@ -156,7 +157,8 @@ contract OrderBook is ReentrancyGuard {
         uint256 _tokenBase,
         uint256 _minExecutionFee,
         uint256 _minMargin,
-        uint256 _maxMargin
+        uint256 _maxMargin,
+        address _feeCalculator
     ) public {
         admin = msg.sender;
         pikaPerp = _pikaPerp;
@@ -166,6 +168,7 @@ contract OrderBook is ReentrancyGuard {
         minExecutionFee = _minExecutionFee;
         minMargin = _minMargin;
         maxMargin = _maxMargin;
+        feeCalculator = _feeCalculator;
     }
 
     function setMinExecutionFee(uint256 _minExecutionFee) external onlyAdmin {
@@ -179,9 +182,29 @@ contract OrderBook is ReentrancyGuard {
         emit UpdateMargin(_minMargin, _maxMargin);
     }
 
+    function setFeeCalculator(address _feeCalculator) external onlyAdmin {
+        feeCalculator = _feeCalculator;
+    }
+
     function setAdmin(address _admin) external onlyAdmin {
         admin = _admin;
         emit UpdateAdmin(_admin);
+    }
+
+    function executeOrders(
+        address[] memory _openAddresses,
+        uint256[] memory _openOrderIndexes,
+        address[] memory _closeAddresses,
+        uint256[] memory _closeOrderIndexes,
+        address payable _feeReceiver
+    ) external nonReentrant {
+        require(_openAddresses.length == _openOrderIndexes.length && _closeAddresses.length == _closeOrderIndexes.length, "not same length");
+        for (uint256 i = 0; i < _openAddresses.length; i++) {
+            executeOpenOrder(_openAddresses[i], _openOrderIndexes[i], _feeReceiver);
+        }
+        for (uint256 i = 0; i < _closeAddresses.length; i++) {
+            executeCloseOrder(_closeAddresses[i], _closeOrderIndexes[i], _feeReceiver);
+        }
     }
 
     function cancelMultiple(
@@ -195,7 +218,6 @@ contract OrderBook is ReentrancyGuard {
             cancelCloseOrder(_closeOrderIndexes[i]);
         }
     }
-
 
     function validatePositionOrderPrice(
         bool _triggerAboveThreshold,
@@ -262,10 +284,10 @@ contract OrderBook is ReentrancyGuard {
         (,uint256 maxLeverage,,,,,,,,,,) = IPikaPerp(pikaPerp).getProduct(_productId);
         require(_leverage <= maxLeverage, "leverage too high");
         if (IERC20(collateralToken).isETH()) {
-            IERC20(collateralToken).uniTransferFromSenderToThis((getTradeFee(_productId, _margin, _leverage) + _executionFee + _margin * _leverage / BASE) * tokenBase / BASE);
+            IERC20(collateralToken).uniTransferFromSenderToThis((_executionFee + _margin * _leverage / BASE) * tokenBase / BASE);
         } else {
             require(msg.value == _executionFee * 1e18 / BASE, "OrderBook: incorrect execution fee transferred");
-            IERC20(collateralToken).uniTransferFromSenderToThis((getTradeFee(_productId, _margin, _leverage) + _margin * _leverage / BASE) * tokenBase / BASE);
+            IERC20(collateralToken).uniTransferFromSenderToThis((_margin * _leverage / BASE) * tokenBase / BASE);
         }
 
         _createOpenOrder(
@@ -326,9 +348,6 @@ contract OrderBook is ReentrancyGuard {
         require(order.account != address(0), "OrderBook: non-existent order");
         (,uint256 maxLeverage,,,,,,,,,,) = IPikaPerp(pikaPerp).getProduct(order.productId);
         require(_leverage <= maxLeverage, "leverage too high");
-        if (_leverage > order.leverage) {
-            order.margin -= getTradeFee(order.productId, order.margin, _leverage - order.leverage);
-        }
         order.leverage = _leverage;
         order.triggerPrice = _triggerPrice;
         order.triggerAboveThreshold = _triggerAboveThreshold;
@@ -351,11 +370,10 @@ contract OrderBook is ReentrancyGuard {
 
         delete openOrders[msg.sender][_orderIndex];
 
-        uint256 tradeFee = getTradeFee(order.productId, order.margin, order.leverage);
         if (IERC20(collateralToken).isETH()) {
-            IERC20(collateralToken).uniTransfer(msg.sender, (tradeFee + order.executionFee + order.margin * order.leverage / BASE) * tokenBase / BASE);
+            IERC20(collateralToken).uniTransfer(msg.sender, (order.executionFee + order.margin * order.leverage / BASE) * tokenBase / BASE);
         } else {
-            IERC20(collateralToken).uniTransfer(msg.sender, (tradeFee + order.margin * order.leverage / BASE) * tokenBase / BASE);
+            IERC20(collateralToken).uniTransfer(msg.sender, (order.margin * order.leverage / BASE) * tokenBase / BASE);
             payable(msg.sender).sendValue(order.executionFee.mul(tokenBase).div(BASE));
         }
 
@@ -372,7 +390,7 @@ contract OrderBook is ReentrancyGuard {
         );
     }
 
-    function executeOpenOrder(address _address, uint256 _orderIndex, address payable _feeReceiver) external nonReentrant {
+    function executeOpenOrder(address _address, uint256 _orderIndex, address payable _feeReceiver) public nonReentrant {
         OpenOrder memory order = openOrders[_address][_orderIndex];
         require(order.account != address(0), "OrderBook: non-existent order");
 
@@ -383,14 +401,14 @@ contract OrderBook is ReentrancyGuard {
         );
 
         delete openOrders[_address][_orderIndex];
-
-        uint256 tradeFee = getTradeFee(order.productId, order.margin, order.leverage);
+        // deduct trading fee from margin
+        uint256 margin = order.margin * BASE / (BASE + getTradeFeeRate(order.productId, order.margin, order.leverage, order.account) * order.leverage / 10**4);
         if (IERC20(collateralToken).isETH()) {
-            IPikaPerp(pikaPerp).openPosition{value: (order.margin + tradeFee) * tokenBase / BASE }(_address, order.productId, order.margin, order.isLong, order.leverage);
+            IPikaPerp(pikaPerp).openPosition{value: order.margin * tokenBase / BASE }(_address, order.productId, margin, order.isLong, order.leverage);
         } else {
             IERC20(collateralToken).safeApprove(pikaPerp, 0);
-            IERC20(collateralToken).safeApprove(pikaPerp, (order.margin + tradeFee) * tokenBase / BASE);
-            IPikaPerp(pikaPerp).openPosition(_address, order.productId, order.margin, order.isLong, order.leverage);
+            IERC20(collateralToken).safeApprove(pikaPerp, order.margin * tokenBase / BASE);
+            IPikaPerp(pikaPerp).openPosition(_address, order.productId, margin, order.isLong, order.leverage);
         }
 
         // pay executor
@@ -400,7 +418,7 @@ contract OrderBook is ReentrancyGuard {
             order.account,
             _orderIndex,
             order.productId,
-            order.margin,
+            margin,
             order.leverage,
             order.isLong,
             order.triggerPrice,
@@ -462,7 +480,7 @@ contract OrderBook is ReentrancyGuard {
         );
     }
 
-    function executeCloseOrder(address _address, uint256 _orderIndex, address payable _feeReceiver) external nonReentrant {
+    function executeCloseOrder(address _address, uint256 _orderIndex, address payable _feeReceiver) public nonReentrant {
         CloseOrder memory order = closeOrders[_address][_orderIndex];
         require(order.account != address(0), "OrderBook: non-existent order");
         (,uint256 leverage,,,,,,,) = IPikaPerp(pikaPerp).getPosition(_address, order.productId, order.isLong);
@@ -535,9 +553,12 @@ contract OrderBook is ReentrancyGuard {
         );
     }
 
-    function getTradeFee(uint256 _productId, uint256 _margin, uint256 _leverage) private returns(uint256) {
-        (,,uint256 productFee,,,,,,,,,) = IPikaPerp(pikaPerp).getProduct(_productId);
-        return _margin.mul(_leverage).div(BASE).mul(productFee).div(10**4);
+    function getTradeFeeRate(uint256 _productId, uint256 _margin, uint256 _leverage, address _account) private returns(uint256) {
+        (address productToken,,uint256 fee,,,,,,,,,) = IPikaPerp(pikaPerp).getProduct(_productId);
+        int256 dynamicFee = IFeeCalculator(feeCalculator).getFee(productToken, _account);
+        return dynamicFee > 0 ? fee + uint256(dynamicFee) : fee - uint256(-1*dynamicFee);
     }
 
+    fallback() external payable {}
+    receive() external payable {}
 }

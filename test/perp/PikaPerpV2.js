@@ -123,7 +123,7 @@ describe("Trading", () => {
 
 		const orderbookContract = await ethers.getContractFactory("OrderBook");
 		orderbook = await orderbookContract.deploy(trading.address, oracle.address, usdc.address, "1000000",
-			"100000", "5000000000", "10000000000000");
+			"100000", "5000000000", "10000000000000", feeCalculator.address);
 
 		let v = [
 			100000000000000, //1m usdc cap
